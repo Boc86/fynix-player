@@ -1,5 +1,9 @@
 # Fynic Player
 
+> This app was generated using [OpenCode](https://opencode.ai) and vibe coding — it is AI-generated code.
+
+
+
 A mobile-first web + Android music player that connects to [Navidrome](https://www.navidrome.org/) (or any Subsonic-compatible server) and [SoulSync](https://github.com/Nezreka/SoulSync) for music browsing, playback, and wishlist management.
 
 ## Features
