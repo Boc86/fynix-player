@@ -1,4 +1,4 @@
-# Fynic Player
+# Fynix Player
 
 > This app was generated using [OpenCode](https://opencode.ai) and vibe coding — it is AI-generated code.
 
