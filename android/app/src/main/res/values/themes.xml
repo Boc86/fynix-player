@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Fynix" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#FF121212</item>
+        <item name="colorPrimary">#FFFF6D00</item>
+        <item name="android:statusBarColor">#FF121212</item>
+        <item name="android:navigationBarColor">#FF121212</item>
+    </style>
+</resources>
