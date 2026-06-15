@@ -42,7 +42,7 @@ Download the latest APK from the [Releases](https://github.com/Boc86/fynix-playe
 ### SoulSync
 | Setting | Description |
 |---|---|
-| Server URL | SoulSync server address (e.g., `http://100.76.116.120:8008`) |
+| Server URL | SoulSync server address (e.g., `http://your-soulsync-server:8008`) |
 | API Key | Your SoulSync API key |
 | Proxy URL | (Android only) Auto-set to `http://localhost:8080` |
 
