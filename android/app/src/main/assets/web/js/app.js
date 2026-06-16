@@ -36,25 +36,26 @@
   }
 
   function init() {
-    renderLayout()
-    bindNavigation()
-    bindSettings()
-    bindPlayer()
-    bindSearch()
-    bindKeyboard()
-    applySavedSettings()
-    if (!navidrome.configured) {
-      navigate('settings')
+    try {
+      renderLayout()
+      bindNavigation()
+      bindSettings()
+      bindPlayer()
+      bindSearch()
+      bindKeyboard()
+      applySavedSettings()
+      if (!navidrome.configured) {
+        navigate('settings')
+      } else {
+        navigate('home')
+        setTimeout(() => {
+          try { restorePlaybackState() } catch (_) {}
+        }, 0)
+      }
+    } finally {
       hideSplash()
-    } else {
-      navigate('home')
-      setTimeout(() => {
-        try { restorePlaybackState() } catch (_) {}
-        hideSplash()
-      }, 0)
+      setTimeout(hideSplash, 3000)
     }
-    // Fallback: never let splash stick forever
-    setTimeout(hideSplash, 3000)
   }
 
   function hideSplash() {
@@ -1954,5 +1955,5 @@
     })
   }
 
-  document.addEventListener('DOMContentLoaded', init)
+  init()
 })()
