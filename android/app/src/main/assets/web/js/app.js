@@ -105,6 +105,17 @@
 
   function applySavedSettings() {
     const s = settings.load()
+    // On Android, default empty proxy to local server
+    if (window.AndroidBridge) {
+      if (!s.navidrome_proxy) {
+        s.navidrome_proxy = 'http://localhost:8080'
+        settings.save({ navidrome_proxy: 'http://localhost:8080' })
+      }
+      if (!s.soulsync_proxy) {
+        s.soulsync_proxy = 'http://localhost:8080'
+        settings.save({ soulsync_proxy: 'http://localhost:8080' })
+      }
+    }
     if (s.navidrome_server) {
       Object.assign(navidrome, {
         server: s.navidrome_server,
