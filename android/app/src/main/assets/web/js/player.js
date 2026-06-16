@@ -56,6 +56,7 @@ class MusicPlayer {
         })),
         currentIndex: state.currentIndex,
         currentTime: state.currentTime,
+        playing: state.playing,
         repeat: state.repeat,
         shuffle: state.shuffle,
         volume: state.volume,
@@ -79,6 +80,7 @@ class MusicPlayer {
       this.shuffle = data.shuffle || false
       if (data.volume !== undefined) this.audio.volume = data.volume
       this._restored = true
+      this._restoredPlaying = !!data.playing
       this._savedCurrentTime = data.currentTime || 0
     } catch (_) {}
   }

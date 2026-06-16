@@ -43,55 +43,58 @@
     bindSearch()
     bindKeyboard()
     applySavedSettings()
-    try { restorePlaybackState() } catch (_) {}
     navigate('home')
+    setTimeout(() => {
+      try { restorePlaybackState() } catch (_) {}
+      hideSplash()
+    }, 0)
+  }
+
+  function hideSplash() {
+    const s = document.getElementById('splash')
+    if (s) s.classList.add('hidden')
   }
 
   function restorePlaybackState() {
     if (!player._restored) return
     if (player.queue.length === 0 || player.currentIndex < 0) return
-    // Recompute streamUrl and coverUrl for any tracks that need them
-    player.queue.forEach(t => {
-      if (t.id && !t.streamUrl && navidrome.configured) {
-        t.streamUrl = navidrome.streamUrl(t.id)
-        t.coverUrl = navidrome.coverUrl(t.id, 300)
-      }
-    })
     const track = player.queue[player.currentIndex]
-    if (!track) return
-    // Ensure the current track has streamUrl
-    if (!track.streamUrl && navidrome.configured) {
-      track.streamUrl = navidrome.streamUrl(track.id)
-      track.coverUrl = navidrome.coverUrl(track.id, 300)
-    }
-    if (!track.streamUrl) return
-    player._loadCurrent()
-    // Directly populate the bottom bar UI
+    if (!track || !track.streamUrl) return
     const savedTime = player._savedCurrentTime || 0
+    const wasPlaying = player._restoredPlaying
     const dur = track.duration || 0
     const pct = dur ? (savedTime / dur) * 100 : 0
     const titleText = track.title || track.name || 'Unknown'
     const artistText = [track.artist, track.artist_name, track.albumArtist, track.albumName].filter(Boolean).join(' · ')
     const coverSrc = track.coverUrl || ''
-    const $ = (id) => document.getElementById(id)
-    const npTitle = $('np-title'); if (npTitle) npTitle.textContent = titleText
-    const npArtist = $('np-artist'); if (npArtist) npArtist.textContent = artistText
-    const npCover = $('np-cover'); if (npCover) npCover.src = coverSrc
-    $('np-overlay-cover') && ($('np-overlay-cover').src = coverSrc)
-    $('np-overlay-title') && ($('np-overlay-title').textContent = titleText)
-    $('np-overlay-artist') && ($('np-overlay-artist').textContent = artistText)
-    $('np-overlay-album') && ($('np-overlay-album').textContent = track.albumName || track.album || '')
-    // Position
-    const pb = $('progress-bar'); if (pb) pb.value = pct
-    const pf = $('np-progress-fill'); if (pf) pf.style.width = pct + '%'
-    const nc = $('np-current'); if (nc) nc.textContent = player.formatTime(savedTime)
-    const nd = $('np-duration'); if (nd) nd.textContent = player.formatTime(dur)
-    const op = $('np-overlay-progress'); if (op) op.value = pct
-    const oc = $('np-overlay-current'); if (oc) oc.textContent = player.formatTime(savedTime)
-    const od = $('np-overlay-duration'); if (od) od.textContent = player.formatTime(dur)
-    // Play button shows pause since we're trying to play
-    const cp = $('ctrl-play'); if (cp) cp.innerHTML = icons.pause
-    const np = $('np-overlay-play'); if (np) np.innerHTML = icons.pause
+    const byId = id => document.getElementById(id)
+    // Bottom bar
+    const nt = byId('np-title'); if (nt) nt.textContent = titleText
+    const na = byId('np-artist'); if (na) na.textContent = artistText
+    const nc = byId('np-cover'); if (nc) nc.src = coverSrc
+    // Now playing overlay
+    const noc = byId('np-overlay-cover'); if (noc) noc.src = coverSrc
+    const not = byId('np-overlay-title'); if (not) not.textContent = titleText
+    const noa = byId('np-overlay-artist'); if (noa) noa.textContent = artistText
+    const noab = byId('np-overlay-album'); if (noab) noab.textContent = track.albumName || track.album || ''
+    // Progress
+    const pb = byId('progress-bar'); if (pb) pb.value = pct
+    const pf = byId('np-progress-fill'); if (pf) pf.style.width = pct + '%'
+    const nc2 = byId('np-current'); if (nc2) nc2.textContent = player.formatTime(savedTime)
+    const nd = byId('np-duration'); if (nd) nd.textContent = player.formatTime(dur)
+    const op = byId('np-overlay-progress'); if (op) op.value = pct
+    const oc = byId('np-overlay-current'); if (oc) oc.textContent = player.formatTime(savedTime)
+    const od = byId('np-overlay-duration'); if (od) od.textContent = player.formatTime(dur)
+    // Play button
+    const cp = byId('ctrl-play'); if (cp) cp.innerHTML = wasPlaying ? icons.pause : icons.play
+    const np = byId('np-overlay-play'); if (np) np.innerHTML = wasPlaying ? icons.pause : icons.play
+    // Show now-playing bar
+    const npb = byId('now-playing-bar')
+    if (npb) npb.style.display = ''
+    // Start audio if it was playing
+    if (wasPlaying) {
+      player._loadCurrent()
+    }
   }
 
   function applySavedSettings() {
