@@ -99,10 +99,8 @@
     // Show now-playing bar
     const npb = byId('now-playing-bar')
     if (npb) npb.style.display = ''
-    // Start audio if it was playing
-    if (wasPlaying) {
-      player._loadCurrent()
-    }
+    // Load audio to get correct duration/currentTime, seek to saved position
+    player._loadCurrent(wasPlaying)
   }
 
   function applySavedSettings() {
@@ -873,6 +871,17 @@
     }
   }
 
+  function bindSearch() {
+    document.addEventListener('click', e => {
+      const btn = e.target.closest('.ss-wishlist-btn')
+      if (btn) {
+        const idx = parseInt(btn.dataset.idx)
+        const data = window._ssData?.[idx]
+        if (data) addToWishlist(data)
+      }
+    })
+  }
+
   function renderSearch() {
     $('#view-search').innerHTML = `
       <div class="search-container">
@@ -898,14 +907,6 @@
       if (e.key === 'Enter') doSearch()
     })
     $('#search-input').focus()
-    document.addEventListener('click', e => {
-      const btn = e.target.closest('.ss-wishlist-btn')
-      if (btn) {
-        const idx = parseInt(btn.dataset.idx)
-        const data = window._ssData?.[idx]
-        if (data) addToWishlist(data)
-      }
-    })
   }
 
   async function doSearch() {

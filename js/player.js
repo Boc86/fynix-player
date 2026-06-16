@@ -132,12 +132,14 @@ class MusicPlayer {
     this._loadCurrent()
   }
 
-  _loadCurrent() {
+  _loadCurrent(autoplay = true) {
     const track = this.queue[this.currentIndex]
     if (!track) return
     this.audio.src = track.streamUrl || ''
     this.audio.load()
-    this.audio.play().catch(() => {})
+    if (autoplay) {
+      this.audio.play().catch(() => {})
+    }
     if (this._restored) {
       this._restored = false
       const savedTime = this._savedCurrentTime || 0
