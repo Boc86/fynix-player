@@ -139,6 +139,14 @@ class MusicPlayer {
     if (this._restored) {
       this._restored = false
       const savedTime = this._savedCurrentTime || 0
+      // Immediately emit loaded so the UI shows track info + saved position
+      const dummyState = Object.assign(this.getState(), {
+        currentTime: savedTime,
+        duration: track.duration || this.audio.duration || 0
+      })
+      this._emit('loaded', dummyState)
+      this._emit('timeupdate', dummyState)
+      this._emit('play', dummyState)
       if (savedTime > 0) {
         const trySeek = () => {
           if (this.audio.readyState >= 2 || this.audio.duration > 0) {
