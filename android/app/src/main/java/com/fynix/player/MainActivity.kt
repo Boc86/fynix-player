@@ -16,14 +16,20 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        var mediaActionCallback: ((String) -> Unit)? = null
+    }
+
     private lateinit var webView: WebView
     private lateinit var localServer: LocalServer
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        mediaActionCallback = { action -> handleMediaAction(action) }
         requestNotificationPermission()
         startLocalServer()
         setupWebView()
+        handleMediaAction(intent)
     }
 
     private fun requestNotificationPermission() {
@@ -83,6 +89,11 @@ class MainActivity : AppCompatActivity() {
 
                 @JavascriptInterface
                 fun getVersion(): String = "1.0.0"
+
+                @JavascriptInterface
+                fun updatePosition(pos: Double) {
+                    AudioService.updatePosition(pos.toLong() * 1000)
+                }
             } as Any, "AndroidBridge")
 
             webViewClient = object : WebViewClient() {
@@ -117,6 +128,7 @@ class MainActivity : AppCompatActivity() {
             }));
         }
         AndroidBridge.isPlaying(state.playing ? true : false);
+        AndroidBridge.updatePosition(state.currentTime || 0);
     }
 
     var origLoad = window.player && window.player.on ? window.player.on : null;
@@ -159,8 +171,9 @@ class MainActivity : AppCompatActivity() {
                 }));
             }
             AndroidBridge.isPlaying(s.playing ? true : false);
+            AndroidBridge.updatePosition(s.currentTime || 0);
         }
-    }, 5000);
+    }, 2000);
 
     // Send initial state immediately
     sendUpdate();
@@ -186,8 +199,7 @@ class MainActivity : AppCompatActivity() {
         handleMediaAction(intent)
     }
 
-    private fun handleMediaAction(intent: Intent?) {
-        val action = intent?.getStringExtra(AudioService.EXTRA_ACTION) ?: return
+    private fun handleMediaAction(action: String) {
         val js = when (action) {
             AudioService.ACTION_TOGGLE -> "window.player && window.player.togglePlay()"
             AudioService.ACTION_PLAY -> {
@@ -205,7 +217,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun handleMediaAction(intent: Intent?) {
+        val action = intent?.getStringExtra(AudioService.EXTRA_ACTION) ?: return
+        handleMediaAction(action)
+    }
+
     override fun onDestroy() {
+        mediaActionCallback = null
         localServer.stop()
         super.onDestroy()
     }

@@ -38,6 +38,7 @@ class AudioService : android.app.Service() {
         private var currentCoverUrl = ""
         private var currentCoverBitmap: Bitmap? = null
         private var currentDuration = 0
+        private var currentPosition = 0L
         private var isCurrentlyPlaying = false
 
         fun updateNowPlaying(ctx: Context, title: String, artist: String, album: String, coverArt: String, duration: Int) {
@@ -50,6 +51,11 @@ class AudioService : android.app.Service() {
             instance?.fetchCoverBitmap()
             instance?.updateMetadata()
             instance?.updateNotification()
+        }
+
+        fun updatePosition(pos: Long) {
+            currentPosition = pos
+            instance?.updateMediaSessionState()
         }
 
         fun setPlaying(ctx: Context, playing: Boolean) {
@@ -91,30 +97,33 @@ class AudioService : android.app.Service() {
     private fun setupMediaSession() {
         mediaSession = MediaSessionCompat(this, "FynixMediaSession")
         mediaSession.setCallback(object : MediaSessionCompat.Callback() {
-            override fun onPlay() { sendAction(ACTION_PLAY) }
-            override fun onPause() { sendAction(ACTION_PAUSE) }
-            override fun onSkipToNext() { sendAction(ACTION_NEXT) }
-            override fun onSkipToPrevious() { sendAction(ACTION_PREV) }
+            override fun onPlay() { dispatchAction(ACTION_PLAY) }
+            override fun onPause() { dispatchAction(ACTION_PAUSE) }
+            override fun onSkipToNext() { dispatchAction(ACTION_NEXT) }
+            override fun onSkipToPrevious() { dispatchAction(ACTION_PREV) }
         })
         mediaSession.isActive = true
         updateMediaSessionState()
     }
 
-    private fun sendAction(action: String) {
-        try {
+    private fun dispatchAction(action: String) {
+        val cb = MainActivity.mediaActionCallback
+        if (cb != null) {
+            cb(action)
+        } else {
             val intent = Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(EXTRA_ACTION, action)
             }
             startActivity(intent)
-        } catch (_: Exception) {}
+        }
     }
 
     private fun registerNoisyReceiver() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
-                    sendAction(ACTION_PAUSE)
+                    dispatchAction(ACTION_PAUSE)
                 }
             }
         }
@@ -132,7 +141,6 @@ class AudioService : android.app.Service() {
                 if (bitmap != null) {
                     val scaled = Bitmap.createScaledBitmap(bitmap, 256, 256, true)
                     currentCoverBitmap = scaled
-                    // Run on main thread to update notification
                     android.os.Handler(mainLooper).post { updateNotification() }
                 }
             } catch (_: Exception) {}
@@ -154,7 +162,7 @@ class AudioService : android.app.Service() {
         val state = if (isCurrentlyPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
         mediaSession.setPlaybackState(
             PlaybackStateCompat.Builder()
-                .setState(state, 0, 1f)
+                .setState(state, currentPosition, 1f)
                 .setActions(
                     PlaybackStateCompat.ACTION_PLAY or
                     PlaybackStateCompat.ACTION_PAUSE or
@@ -174,7 +182,6 @@ class AudioService : android.app.Service() {
         val mainIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        val playPauseIcon = if (isCurrentlyPlaying) R.drawable.ic_notification else android.R.drawable.ic_media_play
         val playPauseAction = if (isCurrentlyPlaying) ACTION_PAUSE else ACTION_PLAY
 
         val prevIntent = Intent(this, MainActivity::class.java).apply {
@@ -203,7 +210,7 @@ class AudioService : android.app.Service() {
             .addAction(android.R.drawable.ic_media_previous, "Previous",
                 PendingIntent.getActivity(this, 1, prevIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-            .addAction(playPauseIcon, if (isCurrentlyPlaying) "Pause" else "Play",
+            .addAction(android.R.drawable.ic_media_pause, if (isCurrentlyPlaying) "Pause" else "Play",
                 PendingIntent.getActivity(this, 2, playIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             .addAction(android.R.drawable.ic_media_next, "Next",

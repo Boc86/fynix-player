@@ -23,6 +23,7 @@ class MusicPlayer {
     })
     this.audio.addEventListener('error', (e) => this._emit('error', e))
     this._restoreState()
+    window.addEventListener('beforeunload', () => this._saveState())
   }
 
   _scheduleSave() {
@@ -49,7 +50,9 @@ class MusicPlayer {
           albumName: t.albumName,
           duration: t.duration,
           track: t.track,
-          coverArt: t.coverArt
+          coverArt: t.coverArt,
+          streamUrl: t.streamUrl,
+          coverUrl: t.coverUrl
         })),
         currentIndex: state.currentIndex,
         currentTime: state.currentTime,
