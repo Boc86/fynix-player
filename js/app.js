@@ -42,8 +42,34 @@
     bindPlayer()
     bindSearch()
     bindKeyboard()
-    navigate('home')
     applySavedSettings()
+    restorePlaybackState()
+    navigate('home')
+  }
+
+  function restorePlaybackState() {
+    if (!player._restored) return
+    try {
+      const raw = localStorage.getItem('fynix_playback_state')
+      if (!raw) return
+      const data = JSON.parse(raw)
+      if (!data.queue || !data.queue.length) return
+      // Recompute streamUrl and coverUrl for each track in the restored queue
+      data.queue.forEach(t => {
+        if (t.id && navidrome.configured) {
+          t.streamUrl = navidrome.streamUrl(t.id)
+          t.coverUrl = navidrome.coverUrl(t.id, 300)
+        }
+      })
+      player.queue = data.queue
+      if (player.currentIndex >= 0 && player.currentIndex < player.queue.length) {
+        player._loadCurrent()
+      }
+      const btn = document.getElementById('ctrl-play')
+      const npBtn = document.getElementById('np-overlay-play')
+      if (btn) btn.innerHTML = icons.pause
+      if (npBtn) npBtn.innerHTML = icons.pause
+    } catch (_) {}
   }
 
   function applySavedSettings() {

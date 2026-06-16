@@ -161,6 +161,9 @@ class MainActivity : AppCompatActivity() {
             AndroidBridge.isPlaying(s.playing ? true : false);
         }
     }, 5000);
+
+    // Send initial state immediately
+    sendUpdate();
 })();
 """.trimIndent()
         webView.evaluateJavascript(js, null)
@@ -171,6 +174,35 @@ class MainActivity : AppCompatActivity() {
         webView.evaluateJavascript(
             "window.player && window.player.updateNowPlaying && window.player.updateNowPlaying()", null
         )
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleMediaAction(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        handleMediaAction(intent)
+    }
+
+    private fun handleMediaAction(intent: Intent?) {
+        val action = intent?.getStringExtra(AudioService.EXTRA_ACTION) ?: return
+        val js = when (action) {
+            AudioService.ACTION_TOGGLE -> "window.player && window.player.togglePlay()"
+            AudioService.ACTION_PLAY -> {
+                "window.player && (function(){ if (window.player.audio && window.player.audio.paused) window.player.togglePlay() })()"
+            }
+            AudioService.ACTION_PAUSE -> {
+                "window.player && (function(){ if (window.player.audio && !window.player.audio.paused) window.player.togglePlay() })()"
+            }
+            AudioService.ACTION_NEXT -> "window.player && window.player.next()"
+            AudioService.ACTION_PREV -> "window.player && window.player.prev()"
+            else -> null
+        }
+        if (js != null) {
+            webView.evaluateJavascript(js, null)
+        }
     }
 
     override fun onDestroy() {
