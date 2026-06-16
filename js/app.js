@@ -43,11 +43,18 @@
     bindSearch()
     bindKeyboard()
     applySavedSettings()
-    navigate('home')
-    setTimeout(() => {
-      try { restorePlaybackState() } catch (_) {}
+    if (!navidrome.configured) {
+      navigate('settings')
       hideSplash()
-    }, 0)
+    } else {
+      navigate('home')
+      setTimeout(() => {
+        try { restorePlaybackState() } catch (_) {}
+        hideSplash()
+      }, 0)
+    }
+    // Fallback: never let splash stick forever
+    setTimeout(hideSplash, 3000)
   }
 
   function hideSplash() {
