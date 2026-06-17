@@ -1,11 +1,10 @@
 package com.fynix.player
 
+import android.content.Intent
 import android.os.Bundle
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaDescriptionCompat
-import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
-import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
 import kotlinx.coroutines.*
 import java.net.URLEncoder
@@ -18,6 +17,9 @@ class BrowserService : MediaBrowserServiceCompat() {
         const val ALBUMS_ROOT = "albums"
         const val PLAYLISTS_ROOT = "playlists"
         const val SEARCH_ROOT = "search"
+        const val EXTRA_MEDIA_ID = "media_id"
+        const val EXTRA_PARENT_TYPE = "parent_type"
+        const val EXTRA_PARENT_ID = "parent_id"
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -26,6 +28,7 @@ class BrowserService : MediaBrowserServiceCompat() {
 
     override fun onCreate() {
         super.onCreate()
+        startForegroundService(Intent(this, AudioService::class.java))
         val prefs = getSharedPreferences("fynix_settings", MODE_PRIVATE)
         navidrome = NavidromeClient(
             server = prefs.getString("navidrome_server", "") ?: "",
@@ -33,30 +36,35 @@ class BrowserService : MediaBrowserServiceCompat() {
             password = prefs.getString("navidrome_password", "") ?: ""
         )
 
-        session = MediaSessionCompat(this, "FynixAutoSession")
-        session?.apply {
-            setFlags(
+        session = MediaSessionHolder.session
+        if (session == null) {
+            session = MediaSessionCompat(this, "FynixAutoSession")
+            MediaSessionHolder.session = session
+        }
+        session?.let { s ->
+            s.setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
                 MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS or
                 MediaSessionCompat.FLAG_HANDLES_QUEUE_COMMANDS
             )
-            setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay() {
-                    val intent = packageManager.getLaunchIntentForPackage(packageName)
-                    startActivity(intent)
-                }
-                override fun onPlayFromMediaId(mediaId: String, extras: Bundle?) {
-                    startActivity(packageManager.getLaunchIntentForPackage(packageName))
-                }
+            s.isActive = true
+        }
+        setSessionToken(session!!.sessionToken)
+    }
 
-            })
-            setSessionToken(sessionToken)
-            isActive = true
-            setPlaybackState(
-                PlaybackStateCompat.Builder()
-                    .setState(PlaybackStateCompat.STATE_NONE, 0, 0f)
-                    .build()
-            )
+    override fun onSearch(query: String, extras: Bundle?, result: Result<MutableList<MediaBrowserCompat.MediaItem>>) {
+        result.detach()
+        scope.launch {
+            val (_, albums, songs) = navidrome.search3(query)
+            val items = mutableListOf<MediaBrowserCompat.MediaItem>()
+            albums.forEach { a ->
+                items.add(createPlayableItem(a.name, "|album:${a.id}", a.artist, a.coverArt))
+            }
+            songs.forEach { s ->
+                val mid = if (s.albumId.isNotBlank()) "${s.id}|album:${s.albumId}" else s.id
+                items.add(createPlayableItem(s.title, mid, s.artist, s.coverArt))
+            }
+            result.sendResult(items)
         }
     }
 
@@ -114,37 +122,36 @@ class BrowserService : MediaBrowserServiceCompat() {
 
     private suspend fun loadAlbums(): List<MediaBrowserCompat.MediaItem> {
         return navidrome.getAlbumList2("newest", 500).map { a ->
-            createPlayableItem(a.name, a.id, a.artist, a.coverArt) { it }
+            createPlayableItem(a.name, "|album:${a.id}", a.artist, a.coverArt)
         }
     }
 
     private suspend fun loadPlaylists(): List<MediaBrowserCompat.MediaItem> {
-        return navidrome.getPlaylists().map { p ->
-            createBrowsableItem(p.name, "playlist_${p.id}", "${p.songCount} tracks")
+        val items = mutableListOf<MediaBrowserCompat.MediaItem>()
+        items.add(createPlayableItem("Shuffle All", "shuffle_all", "Play all songs shuffled", ""))
+        navidrome.getPlaylists().forEach { p ->
+            items.add(createPlayableItem(p.name, "|playlist:${p.id}", "${p.songCount} tracks", ""))
         }
+        return items
     }
 
     private suspend fun loadArtistAlbums(artistId: String): List<MediaBrowserCompat.MediaItem> {
         return navidrome.getArtist(artistId).map { a ->
-            createPlayableItem(a.name, a.id, a.artist, a.coverArt) { it }
+            createPlayableItem(a.name, "|album:${a.id}", a.artist, a.coverArt)
         }
     }
 
     private suspend fun loadAlbumSongs(albumId: String): List<MediaBrowserCompat.MediaItem> {
         val (_, songs) = navidrome.getAlbum(albumId)
         return songs.map { s ->
-            createPlayableItem(s.title, s.id, s.artist, s.coverArt) { id ->
-                navidrome.streamUrl(id)
-            }
+            createPlayableItem(s.title, "${s.id}|album:${albumId}", s.artist, s.coverArt)
         }
     }
 
     private suspend fun loadPlaylistSongs(playlistId: String): List<MediaBrowserCompat.MediaItem> {
         val songs = navidrome.getPlaylist(playlistId)
         return songs.map { s ->
-            createPlayableItem(s.title, s.id, s.artist, s.coverArt) { id ->
-                navidrome.streamUrl(id)
-            }
+            createPlayableItem(s.title, "${s.id}|playlist:${playlistId}", s.artist, s.coverArt)
         }
     }
 
@@ -160,8 +167,7 @@ class BrowserService : MediaBrowserServiceCompat() {
     }
 
     private fun createPlayableItem(
-        title: String, id: String, artist: String, coverArt: String,
-        streamUrl: (String) -> String
+        title: String, id: String, artist: String, coverArt: String
     ): MediaBrowserCompat.MediaItem {
         val desc = MediaDescriptionCompat.Builder()
             .setMediaId(id)
@@ -178,7 +184,10 @@ class BrowserService : MediaBrowserServiceCompat() {
 
     override fun onDestroy() {
         scope.cancel()
-        session?.release()
+        if (MediaSessionHolder.session != null) {
+            MediaSessionHolder.session = null
+            session?.release()
+        }
         super.onDestroy()
     }
 }

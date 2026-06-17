@@ -1,19 +1,17 @@
 # Fynix Player
 
-> This app was generated using [OpenCode](https://opencode.ai) and vibe coding — it is AI-generated code.
-
-
-
 A mobile-first web + Android music player that connects to [Navidrome](https://www.navidrome.org/) (or any Subsonic-compatible server) and [SoulSync](https://github.com/Nezreka/SoulSync) for music browsing, playback, and wishlist management.
 
 ## Features
 
-- **Navidrome integration** — browse albums, artists, playlists; search tracks; stream audio; view cover art
+- **Navidrome integration** — browse albums, artists, playlists; search tracks; stream audio (MP3 transcoding); view cover art
 - **SoulSync integration** — search tracks/albums/artists, manage wishlist
+- **Navidrome → SoulSync wishlist** — add any Navidrome album tracks to your SoulSync wishlist with one tap
 - **Queue management** — play, shuffle, repeat, seek, volume control
+- **Shuffle All** — shuffle your entire library from Android Auto or in-app button
 - **Material Design 3** — dark theme, orange accent, mobile-first responsive layout
-- **Android app** — WebView wrapper with lock-screen controls and notification
-- **Android Auto** — browse artists/albums/playlists from your car's head unit
+- **Android app** — WebView wrapper with lock-screen controls and notification, persistent settings
+- **Android Auto** — browse artists/albums/playlists from your car's head unit; voice search; Shuffle All
 
 ## Screenshots
 
@@ -36,21 +34,21 @@ Download the latest APK from the [Releases](https://github.com/Boc86/fynix-playe
 ## Configuration
 
 ### Navidrome
+
 | Setting | Description |
 |---|---|
 | Server URL | `https://your-navidrome.example.com` |
 | Username | Your Navidrome username |
 | Password | Your Navidrome password |
-| Proxy URL | (Android only) Auto-set to `http://localhost:8080` |
 
 ### SoulSync
+
 | Setting | Description |
 |---|---|
 | Server URL | SoulSync server address (e.g., `http://your-soulsync-server:8008`) |
 | API Key | Your SoulSync API key |
-| Proxy URL | (Android only) Auto-set to `http://localhost:8080` |
 
-On Android, all API calls go through the local server proxy to bypass CORS restrictions in WebView.
+On Android, all SoulSync API calls go through the embedded local server proxy to bypass CORS restrictions in WebView. Settings are persisted in SharedPreferences and survive app updates.
 
 ## Building
 
@@ -88,12 +86,22 @@ cp index.html android/app/src/main/assets/web/
 │   └── logo.png         # App logo
 └── android/
     └── app/src/main/java/com/fynix/player/
-        ├── MainActivity.kt   # WebView + JS bridge + server
-        ├── AudioService.kt   # Notification + lock-screen controls
-        ├── BrowserService.kt # Android Auto browse tree
-        ├── LocalServer.kt    # NanoHTTPD proxy server
-        └── NavidromeClient.kt # Native Subsonic client for Auto
+        ├── MainActivity.kt     # WebView + JS bridge + embeddded server
+        ├── AudioService.kt     # Notification + lock-screen controls
+        ├── BrowserService.kt   # Android Auto browse tree
+        ├── MediaSessionHolder.kt # Shared MediaSession singleton
+        ├── LocalServer.kt      # NanoHTTPD embedded proxy server
+        └── NavidromeClient.kt  # Native Subsonic client for Auto
 ```
+
+## Android Auto
+
+Android Auto is supported via the `MediaBrowserService` API:
+
+- **Browse**: Artists → Albums → Songs; Playlists; All Songs (Shuffle All)
+- **Play**: Tap any album, playlist, or search result to start playback
+- **Voice Search**: Use Google Assistant to search your music library
+- **Shuffle All**: First item in the Playlists section shuffles your entire library
 
 ## License
 

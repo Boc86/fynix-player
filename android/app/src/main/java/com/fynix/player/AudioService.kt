@@ -12,6 +12,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioManager
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
@@ -30,6 +31,9 @@ class AudioService : android.app.Service() {
         const val ACTION_TOGGLE = "toggle"
         const val ACTION_NEXT = "next"
         const val ACTION_PREV = "prev"
+        const val ACTION_PLAY_MEDIA = "play_media"
+        const val ACTION_SEARCH = "search"
+        const val ACTION_SHUFFLE_ALL = "shuffle_all"
 
         private var instance: AudioService? = null
         private var currentTitle = ""
@@ -40,13 +44,19 @@ class AudioService : android.app.Service() {
         private var currentDuration = 0
         private var currentPosition = 0L
         private var isCurrentlyPlaying = false
+        private var currentMediaId = ""
+        private var currentTrackNumber = 0
+        private var currentAlbumArtist = ""
 
-        fun updateNowPlaying(ctx: Context, title: String, artist: String, album: String, coverArt: String, duration: Int) {
+        fun updateNowPlaying(ctx: Context, title: String, artist: String, album: String, coverArt: String, duration: Int, mediaId: String = "", trackNumber: Int = 0, albumArtist: String = "") {
             currentTitle = title
             currentArtist = artist
             currentAlbum = album
             currentCoverUrl = coverArt
             currentDuration = duration
+            currentMediaId = mediaId
+            currentTrackNumber = trackNumber
+            currentAlbumArtist = albumArtist
             currentCoverBitmap = null
             instance?.fetchCoverBitmap()
             instance?.updateMetadata()
@@ -95,12 +105,58 @@ class AudioService : android.app.Service() {
     }
 
     private fun setupMediaSession() {
-        mediaSession = MediaSessionCompat(this, "FynixMediaSession")
+        mediaSession = MediaSessionHolder.session ?: MediaSessionCompat(this, "FynixMediaSession")
+        if (MediaSessionHolder.session == null) {
+            MediaSessionHolder.session = mediaSession
+        }
         mediaSession.setCallback(object : MediaSessionCompat.Callback() {
             override fun onPlay() { dispatchAction(ACTION_PLAY) }
             override fun onPause() { dispatchAction(ACTION_PAUSE) }
             override fun onSkipToNext() { dispatchAction(ACTION_NEXT) }
             override fun onSkipToPrevious() { dispatchAction(ACTION_PREV) }
+            override fun onPlayFromMediaId(mediaId: String, extras: Bundle?) {
+                if (mediaId == "shuffle_all") {
+                    Intent(this@AudioService, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        putExtra(EXTRA_ACTION, ACTION_SHUFFLE_ALL)
+                    }.let { startActivity(it) }
+                    return
+                }
+                val delim = mediaId.indexOf('|')
+                val (songId, parentType, parentId) = if (delim >= 0) {
+                    val sid = mediaId.substring(0, delim)
+                    val parent = mediaId.substring(delim + 1)
+                    val colon = parent.indexOf(':')
+                    val pt = if (colon > 0) parent.substring(0, colon) else ""
+                    val pi = if (colon > 0) parent.substring(colon + 1) else ""
+                    Triple(sid, pt, pi)
+                } else {
+                    Triple(mediaId, "", "")
+                }
+                val cb = MainActivity.playMediaCallback
+                if (cb != null) {
+                    cb(songId, parentType, parentId)
+                } else {
+                    Intent(this@AudioService, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        putExtra(EXTRA_ACTION, ACTION_PLAY_MEDIA)
+                        putExtra(BrowserService.EXTRA_MEDIA_ID, songId)
+                        putExtra(BrowserService.EXTRA_PARENT_TYPE, parentType)
+                        putExtra(BrowserService.EXTRA_PARENT_ID, parentId)
+                    }.let { startActivity(it) }
+                }
+            }
+            override fun onPlayFromSearch(query: String, extras: Bundle?) {
+                val cb = MainActivity.playMediaCallback
+                if (cb != null) {
+                    cb("", "", "")
+                }
+                Intent(this@AudioService, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    putExtra(EXTRA_ACTION, "search")
+                    putExtra("query", query)
+                }.let { startActivity(it) }
+            }
         })
         mediaSession.isActive = true
         updateMediaSessionState()
@@ -153,7 +209,10 @@ class AudioService : android.app.Service() {
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, currentCoverUrl)
-            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, currentDuration.toLong())
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, currentDuration.toLong() * 1000L)
+            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, currentMediaId)
+            .putLong(MediaMetadataCompat.METADATA_KEY_TRACK_NUMBER, currentTrackNumber.toLong())
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ARTIST, currentAlbumArtist.ifEmpty { currentArtist })
         currentCoverBitmap?.let { builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it) }
         mediaSession.setMetadata(builder.build())
     }
@@ -167,7 +226,8 @@ class AudioService : android.app.Service() {
                     PlaybackStateCompat.ACTION_PLAY or
                     PlaybackStateCompat.ACTION_PAUSE or
                     PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                    PlaybackStateCompat.ACTION_SEEK_TO
                 )
                 .build()
         )
@@ -231,7 +291,10 @@ class AudioService : android.app.Service() {
     override fun onDestroy() {
         instance = null
         noisyReceiver?.let { unregisterReceiver(it) }
-        mediaSession.release()
+        if (MediaSessionHolder.session != null) {
+            MediaSessionHolder.session = null
+            mediaSession.release()
+        }
         super.onDestroy()
     }
 }

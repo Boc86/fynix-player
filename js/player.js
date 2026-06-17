@@ -94,13 +94,15 @@ class MusicPlayer {
   }
 
   getState() {
+    const track = this.queue[this.currentIndex] || null
     return {
-      currentTrack: this.queue[this.currentIndex] || null,
+      currentTrack: track,
       queue: this.queue,
       currentIndex: this.currentIndex,
       playing: !this.audio.paused,
       currentTime: this.audio.currentTime,
       duration: this.audio.duration || 0,
+      trackDuration: track?.duration || 0,
       volume: this.audio.volume,
       repeat: this.repeat,
       shuffle: this.shuffle

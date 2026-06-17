@@ -1,5 +1,6 @@
 (function () {
   const navidrome = new NavidromeClient()
+  window.__navidrome = navidrome
   const soulsync = new SoulSyncClient()
   const settings = new SettingsManager()
   const player = new MusicPlayer()
@@ -105,16 +106,10 @@
 
   function applySavedSettings() {
     const s = settings.load()
-    // On Android, default empty proxy to local server
-    if (window.AndroidBridge) {
-      if (!s.navidrome_proxy) {
-        s.navidrome_proxy = 'http://localhost:8080'
-        settings.save({ navidrome_proxy: 'http://localhost:8080' })
-      }
-      if (!s.soulsync_proxy) {
-        s.soulsync_proxy = 'http://localhost:8080'
-        settings.save({ soulsync_proxy: 'http://localhost:8080' })
-      }
+    // On Android, default SoulSync proxy to local server (for CORS)
+    if (window.AndroidBridge && !s.soulsync_proxy) {
+      s.soulsync_proxy = 'http://localhost:8080'
+      settings.save({ soulsync_proxy: 'http://localhost:8080' })
     }
     if (s.navidrome_server) {
       Object.assign(navidrome, {
@@ -326,14 +321,15 @@
     const t = state.currentTrack
     const el = $('#now-playing-screen')
     if (!t) return
+    const displayDur = state.duration || state.trackDuration || 0
     $('#np-overlay-cover').src = t.coverUrl || ''
     $('#np-overlay-title').textContent = t.title || t.name || 'Unknown'
     $('#np-overlay-artist').textContent = [t.artist, t.artist_name, t.albumArtist].filter(Boolean).join(' · ')
     $('#np-overlay-album').textContent = t.albumName || t.album || ''
     $('#np-overlay-play').innerHTML = state.playing ? icons.pause : icons.play
-    $('#np-overlay-progress').value = state.duration ? (state.currentTime / state.duration) * 100 : 0
+    $('#np-overlay-progress').value = displayDur ? (state.currentTime / displayDur) * 100 : 0
     $('#np-overlay-current').textContent = player.formatTime(state.currentTime)
-    $('#np-overlay-duration').textContent = player.formatTime(state.duration)
+    $('#np-overlay-duration').textContent = player.formatTime(displayDur)
     $('#np-overlay-volume').value = state.volume
     $('#np-ctrl-shuffle').style.opacity = state.shuffle ? '1' : '0.4'
     $('#np-ctrl-repeat').style.opacity = state.repeat ? '1' : '0.4'
@@ -632,7 +628,18 @@
             </div>
           </div>
           <h3 class="section-title">Albums</h3>
-          <div class="album-grid">${albums.map(a => albumCard(a)).join('')}</div>
+          <div class="album-grid">${albums.map(a => `
+            <div class="album-card" onclick="showAlbum('${a.id}')">
+              <div class="album-art">
+                <img src="${navidrome.coverUrl(a.id, 300)}" alt="${escHtml(a.name)}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 300 300%22><rect fill=%22%23333%22 width=%22300%22 height=%22300%22/><text fill=%22%23999%22 font-size=%2280%22 x=%22150%22 y=%22170%22 text-anchor=%22middle%22 font-family=%22monospace%22>&#x266C;</text></svg>'">
+                <div class="album-play-overlay">${icons.play}</div>
+              </div>
+              <div class="album-name">${escHtml(a.name)}</div>
+              <div class="album-artist">${escHtml(a.artist || '')}</div>
+              ${a.year ? `<div class="album-year">${a.year}</div>` : ''}
+              <button class="btn btn-sm btn-secondary wishlist-btn" onclick="event.stopPropagation();addAlbumToWishlist('${a.id}','${escHtml(a.name).replace(/'/g, "\\'")}','${escHtml(a.artist || '').replace(/'/g, "\\'")}')">❤ Wishlist</button>
+            </div>
+          `).join('')}</div>
         </div>
       `
     } catch (e) {
@@ -756,6 +763,99 @@
     const songs = window._currentAlbumSongs || []
     if (songs.length) player.playQueue(songs, 0)
   }
+
+  window.playMediaId = async function (songId, parentType, parentId) {
+    try {
+      if (parentType === 'album' && parentId) {
+        const resp = await navidrome.getAlbum(parentId)
+        const album = resp?.album
+        const songs = (album?.song || []).map(s => ({
+          ...s,
+          streamUrl: navidrome.streamUrl(s.id),
+          coverUrl: navidrome.coverUrl(s.id, 300),
+          albumName: album.name,
+          albumArtist: album.artist
+        }))
+        const idx = songs.findIndex(s => s.id === songId)
+        player.playQueue(songs, idx >= 0 ? idx : 0)
+      } else if (parentType === 'playlist' && parentId) {
+        const resp = await navidrome.getPlaylist(parentId)
+        const entries = resp?.playlist?.entry || []
+        const songs = entries.map(s => ({
+          ...s,
+          streamUrl: navidrome.streamUrl(s.id),
+          coverUrl: navidrome.coverUrl(s.id, 300)
+        }))
+        const idx = songs.findIndex(s => s.id === songId)
+        player.playQueue(songs, idx >= 0 ? idx : 0)
+      } else if (songId) {
+        const resp = await navidrome.getSong(songId)
+        const song = resp?.song
+        if (song) {
+          player.playQueue([{
+            ...song,
+            streamUrl: navidrome.streamUrl(song.id),
+            coverUrl: navidrome.coverUrl(song.id, 300)
+          }], 0)
+        } else {
+          player.playQueue([{ id: songId, streamUrl: navidrome.streamUrl(songId) }], 0)
+        }
+      }
+    } catch (e) {
+      console.error('playMediaId error', e)
+    }
+  }
+
+  window.shuffleAll = async function () {
+    console.log('shuffleAll: fetching albums');
+    try {
+      let allAlbums = [];
+      let offset = 0;
+      const pageSize = 50;
+      while (true) {
+        const resp = await navidrome.getAlbumList2('newest', pageSize, offset);
+        const albums = resp?.albumList2?.album || [];
+        if (albums.length === 0) break;
+        allAlbums = allAlbums.concat(albums);
+        if (albums.length < pageSize || allAlbums.length >= 100) break;
+        offset += pageSize;
+      }
+      console.log('shuffleAll: fetching songs from', allAlbums.length, 'albums');
+      const results = await Promise.all(
+        allAlbums.map(a =>
+          navidrome.getAlbum(a.id)
+            .then(resp => {
+              const album = resp?.album;
+              if (!album || !album.song) return [];
+              return album.song.map(s => ({
+                ...s,
+                streamUrl: navidrome.streamUrl(s.id),
+                coverUrl: navidrome.coverUrl(s.id, 300),
+                albumName: album.name,
+                albumArtist: album.artist
+              }));
+            })
+            .catch(() => [])
+        )
+      );
+      let allSongs = [];
+      for (const songs of results) {
+        allSongs = allSongs.concat(songs);
+      }
+      if (allSongs.length === 0) {
+        console.log('shuffleAll: no songs');
+        return;
+      }
+      for (let i = allSongs.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [allSongs[i], allSongs[j]] = [allSongs[j], allSongs[i]];
+      }
+      console.log('shuffleAll: playing', allSongs.length, 'songs');
+      player.playQueue(allSongs, 0);
+    } catch (e) {
+      console.error('shuffleAll error', e);
+    }
+  };
 
   window.renderArtists = renderArtists
   window.renderAlbums = renderAlbums
@@ -1048,14 +1148,14 @@
         html += `<h4 class="search-subtitle">Artists</h4><div class="search-compact">`
         ssArtists.forEach(a => {
           const img = a.image_url || a.images?.[0]?.url || ''
-          const initial = escHtml(a.name.charAt(0).toUpperCase())
+          const initial = (a.name || '?').charAt(0).toUpperCase()
           html += `<div class="search-item">
             <div class="search-thumb-wrap">${
               img
                 ? `<img class="search-thumb search-thumb-round" src="${img}" alt="" loading="lazy" onerror="this.style.display='none';this.parentNode.querySelector('.search-thumb-fallback').style.display='flex'"><div class="search-thumb-round search-thumb-fallback" style="display:none">${initial}</div>`
                 : `<div class="search-thumb-round search-thumb-fallback">${initial}</div>`
             }</div>
-            <div><strong>${escHtml(a.name)}</strong> <span class="search-item-meta">· ${a.genres?.slice(0, 2).join(', ') || ''}</span></div>
+            <div><strong>${escHtml(a.name || '')}</strong> <span class="search-item-meta">· ${a.genres?.slice(0, 2).join(', ') || ''}</span></div>
           </div>`
         })
         html += `</div>`
@@ -1070,7 +1170,7 @@
           window._ssData.push(data)
           const year = a.release_date?.substring(0, 4) || ''
           const img = a.image_url || a.images?.[0]?.url || ''
-          const initial = escHtml(a.name.charAt(0).toUpperCase())
+          const initial = (a.name || '?').charAt(0).toUpperCase()
           html += `<div class="search-item search-item-clickable" onclick="showSsAlbum(${dataIdx})">
             <div class="search-thumb-wrap">${
               img
@@ -1095,7 +1195,7 @@
           const dataIdx = window._ssData.length
           window._ssData.push(data)
           const img = t.image_url || t.images?.[0]?.url || ''
-          const initial = escHtml(t.name.charAt(0).toUpperCase())
+          const initial = (t.name || '?').charAt(0).toUpperCase()
           html += `<div class="search-item">
             <div class="search-thumb-wrap">${
               img
@@ -1103,7 +1203,7 @@
                 : `<div class="search-thumb-fallback search-thumb-fallback-sq">${initial}</div>`
             }</div>
             <div>
-              <strong>${escHtml(t.name)}</strong>
+              <strong>${escHtml(t.name || '')}</strong>
               <span class="search-item-meta">· ${escHtml(t.artists?.join(', ') || '')} · ${escHtml(t.album || '')}</span>
             </div>
             <button class="btn btn-sm btn-secondary ss-wishlist-btn" data-idx="${dataIdx}" style="margin-left:auto">+ Wishlist</button>
@@ -1191,6 +1291,52 @@
       if (onUpdate) onUpdate(i + 1, tracks.length, added, skipped, failed)
     }
     return { added, skipped, failed }
+  }
+
+  window.addAlbumToWishlist = async function (albumId, albumName, artistName) {
+    if (!soulsync.configured) { showError('SoulSync not configured'); return }
+    if (!navidrome.configured) { showError('Navidrome not configured'); return }
+    try {
+      const resp = await navidrome.getAlbum(albumId)
+      const album = resp?.album
+      const songs = album?.song || []
+      if (!songs.length) { showError(`No tracks found for "${albumName}"`); return }
+
+      showSuccess(`Adding ${songs.length} tracks from "${albumName}" to wishlist...`)
+      let added = 0, skipped = 0, failed = 0
+      for (const s of songs) {
+        const artist = { name: s.artist || artistName, id: s.artistId || albumId }
+        const album = { id: albumId, name: albumName }
+        const trackObj = {
+          id: s.id, name: s.title,
+          artists: [s.artist || artistName],
+          duration_ms: (s.duration || 0) * 1000,
+          track_number: s.track || 0
+        }
+        const sourceContext = { album_name: albumName, artist_name: artistName, album_type: 'album' }
+        try {
+          const r = await soulsync.addAlbumTrackToWishlist(trackObj, artist, album, 'album', sourceContext)
+          if (r?.success) added++
+          else failed++
+        } catch (e) {
+          if (e.message.includes('already in wishlist')) { skipped++ }
+          else {
+            try {
+              await soulsync.addToWishlist({ id: s.id, name: s.title, artists: [s.artist || artistName], album: albumName })
+              added++
+            } catch (e2) {
+              if (e2.message.includes('already in wishlist')) skipped++
+              else failed++
+            }
+          }
+        }
+      }
+      if (added > 0) showSuccess(`Added ${added} track${added !== 1 ? 's' : ''} from "${albumName}" to wishlist`)
+      else if (skipped > 0) showSuccess(`All ${skipped} track${skipped !== 1 ? 's' : ''} already in wishlist`)
+      else showError(`Failed to add tracks: ${failed} error${failed !== 1 ? 's' : ''}`)
+    } catch (e) {
+      showError(`Failed: ${e.message}`)
+    }
   }
 
   window.addSsAlbumToWishlist = async function (dataIdx, btn) {
@@ -1298,7 +1444,7 @@
         merge(byAlbum)
         merge(byArtist)
 
-        const albumNameLower = albumName.toLowerCase()
+        const albumNameLower = (albumName || '').toLowerCase()
         tracks = allTracks.filter(t => {
           let trackAlbum = ''
           if (typeof t.album === 'string') trackAlbum = t.album
@@ -1440,6 +1586,7 @@
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" id="pl-create-btn">${icons.plus} New</button>
             <button class="btn btn-secondary btn-sm" id="pl-random-btn">${icons.shuffle} Random</button>
+            <button class="btn btn-secondary btn-sm" id="pl-shuffle-btn">${icons.shuffle} Shuffle All</button>
           </div>
         </div>
       `
@@ -1478,6 +1625,9 @@
       if (name?.trim()) createPlaylist(name.trim())
     })
     $('#pl-random-btn')?.addEventListener('click', generateRandomPlaylist)
+    $('#pl-shuffle-btn')?.addEventListener('click', () => {
+      if (window.shuffleAll) window.shuffleAll()
+    })
   }
 
   async function createPlaylist(name) {
@@ -1702,6 +1852,7 @@
   window.player = player
   window.navidrome = navidrome
   window.soulsync = soulsync
+  window.saveSettings = saveSettings
 
   function loadWishlistInSettings() {
     renderWishlistTo($('#settings-wishlist-content'))
@@ -1910,18 +2061,19 @@
     })
 
     player.on('timeupdate', state => {
-      const pct = state.duration ? (state.currentTime / state.duration) * 100 : 0
-      if (!scrubbing && state.duration) {
+      const displayDur = state.duration || state.trackDuration || 0
+      const pct = displayDur ? (state.currentTime / displayDur) * 100 : 0
+      if (!scrubbing && displayDur) {
         progressBar.value = pct
       }
-      if (!npScrubbing && state.duration) {
+      if (!npScrubbing && displayDur) {
         npOverlayProgress.value = pct
       }
       if (progressFill) progressFill.style.width = `${pct}%`
       if (npCurrent) npCurrent.textContent = player.formatTime(state.currentTime)
-      if (npDuration) npDuration.textContent = player.formatTime(state.duration)
+      if (npDuration) npDuration.textContent = player.formatTime(displayDur)
       if (npOverlayCurrent) npOverlayCurrent.textContent = player.formatTime(state.currentTime)
-      if (npOverlayDuration) npOverlayDuration.textContent = player.formatTime(state.duration)
+      if (npOverlayDuration) npOverlayDuration.textContent = player.formatTime(displayDur)
       if (npOverlayProgress) npOverlayProgress.value = pct
       if (npOverlayVolume) npOverlayVolume.value = state.volume
     })

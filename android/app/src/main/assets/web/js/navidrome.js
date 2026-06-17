@@ -4,6 +4,7 @@ class NavidromeClient {
     this.username = localStorage.getItem('navidrome_username') || ''
     this.password = localStorage.getItem('navidrome_password') || ''
     this.proxyUrl = localStorage.getItem('navidrome_proxy') || ''
+    this.streamFormat = localStorage.getItem('navidrome_stream_format') || ''
     this.clientName = 'music-web-app'
   }
 
@@ -98,6 +99,10 @@ class NavidromeClient {
     return this._request('getRandomSongs', { size: String(size) })
   }
 
+  async getSong(id) {
+    return this._request('getSong', { id })
+  }
+
   async search3(query, artistCount = 20, albumCount = 20, songCount = 20) {
     return this._request('search3', {
       query,
@@ -114,7 +119,8 @@ class NavidromeClient {
       return `${base}/api/navidrome-stream?id=${encodeURIComponent(id)}&server=${encodeURIComponent(this.server)}&u=${encodeURIComponent(this.username)}&p=enc:${this._hexPassword()}`
     }
     const params = this._baseParams()
-    return `${this.server.replace(/\/+$/, '')}/rest/stream.view?id=${encodeURIComponent(id)}&${params}`
+    const fmt = this.streamFormat ? `&format=${encodeURIComponent(this.streamFormat)}` : ''
+    return `${this.server.replace(/\/+$/, '')}/rest/stream.view?id=${encodeURIComponent(id)}&${params}${fmt}`
   }
 
   coverUrl(id, size = 300) {
