@@ -895,8 +895,6 @@
           <label>Server URL <input type="url" class="input" id="s-nav-server" value="${escHtml(s.navidrome_server)}" placeholder="https://music.example.com"></label>
           <label>Username <input type="text" class="input" id="s-nav-user" value="${escHtml(s.navidrome_username)}"></label>
           <label>Password <input type="password" class="input" id="s-nav-pass" value="${escHtml(s.navidrome_password)}"></label>
-          <label>CORS Proxy URL <input type="url" class="input" id="s-nav-proxy" value="${escHtml(s.navidrome_proxy)}" placeholder="http://localhost:8080"></label>
-          <p class="settings-desc">If Navidrome is on a different domain, set proxy URL (e.g., <code>http://localhost:8080</code>)</p>
           <button type="button" class="btn btn-secondary" id="settings-test-navidrome" style="margin-top:8px">Test Connection</button>
         </section>
         <section class="settings-section">
@@ -904,8 +902,6 @@
           <p class="settings-desc">Music discovery and download server</p>
           <label>Server URL <input type="url" class="input" id="s-ss-server" value="${escHtml(s.soulsync_server)}" placeholder="https://soulsync.example.com"></label>
           <label>API Key <input type="password" class="input" id="s-ss-key" value="${escHtml(s.soulsync_apikey)}" placeholder="sk_..."></label>
-          <label>CORS Proxy URL <input type="url" class="input" id="s-ss-proxy" value="${escHtml(s.soulsync_proxy)}" placeholder="http://localhost:8080"></label>
-          <p class="settings-desc">If SoulSync is on a different domain, run <code>python3 server.py</code> and enter <code>http://localhost:8080</code> here.</p>
           <button type="button" class="btn btn-secondary" id="settings-test-soulsync" style="margin-top:8px">Test Connection</button>
         </section>
         <button type="button" class="btn btn-primary" id="settings-save">Save Settings</button>
@@ -923,22 +919,22 @@
       navidrome_server: $('#s-nav-server')?.value || '',
       navidrome_username: $('#s-nav-user')?.value || '',
       navidrome_password: $('#s-nav-pass')?.value || '',
-      navidrome_proxy: $('#s-nav-proxy')?.value || '',
       soulsync_server: $('#s-ss-server')?.value || '',
-      soulsync_apikey: $('#s-ss-key')?.value || '',
-      soulsync_proxy: $('#s-ss-proxy')?.value || ''
+      soulsync_apikey: $('#s-ss-key')?.value || ''
     }
     settings.save(s)
     Object.assign(navidrome, {
       server: s.navidrome_server,
       username: s.navidrome_username,
-      password: s.navidrome_password,
-      proxyUrl: s.navidrome_proxy
+      password: s.navidrome_password
     })
+    if (window.AndroidBridge) {
+      s.soulsync_proxy = 'http://localhost:8080'
+    }
     Object.assign(soulsync, {
       server: s.soulsync_server,
       apiKey: s.soulsync_apikey,
-      proxyUrl: s.soulsync_proxy
+      proxyUrl: s.soulsync_proxy || 'http://localhost:8080'
     })
     updateSidebarStatus()
     showSuccess('Settings saved')
@@ -971,7 +967,7 @@
       const testSs = new SoulSyncClient()
       testSs.server = $('#s-ss-server')?.value || ''
       testSs.apiKey = $('#s-ss-key')?.value || ''
-      testSs.proxyUrl = $('#s-ss-proxy')?.value || ''
+      testSs.proxyUrl = 'http://localhost:8080'
       await testSs.searchTracks('test', 1)
       showSuccess('SoulSync connected!')
     } catch (e) {
@@ -1147,9 +1143,13 @@
       if (ssArtists.length) {
         html += `<h4 class="search-subtitle">Artists</h4><div class="search-compact">`
         ssArtists.forEach(a => {
+          const data = { type: 'artist', raw: a }
+          window._ssData = window._ssData || []
+          const dataIdx = window._ssData.length
+          window._ssData.push(data)
           const img = a.image_url || a.images?.[0]?.url || ''
           const initial = (a.name || '?').charAt(0).toUpperCase()
-          html += `<div class="search-item">
+          html += `<div class="search-item search-item-clickable" onclick="showSsArtist(${dataIdx})">
             <div class="search-thumb-wrap">${
               img
                 ? `<img class="search-thumb search-thumb-round" src="${img}" alt="" loading="lazy" onerror="this.style.display='none';this.parentNode.querySelector('.search-thumb-fallback').style.display='flex'"><div class="search-thumb-round search-thumb-fallback" style="display:none">${initial}</div>`
@@ -1508,6 +1508,92 @@
           </div>
         </div>
       `
+      el.innerHTML = html
+    } catch (e) {
+      el.innerHTML = `<div class="error-msg">${e.message}</div>`
+    }
+  }
+
+  window.showSsArtist = async function (dataIdx) {
+    const data = window._ssData?.[dataIdx]
+    if (!data || data.type !== 'artist') return
+    const { raw } = data
+    const artistName = raw.name || ''
+
+    const el = $('#view-search')
+    el.innerHTML = '<div class="loading"><div class="loading-spinner"></div> Loading...</div>'
+
+    try {
+      const [albumResp, trackResp] = await Promise.all([
+        soulsync.searchAlbums(artistName, 50).catch(() => null),
+        soulsync.searchTracks(artistName, 50).catch(() => null)
+      ])
+
+      const albums = albumResp?.data?.albums?.filter(a =>
+        a.artists?.some(ar => ar.toLowerCase() === artistName.toLowerCase())
+      ) || []
+
+      const tracks = trackResp?.data?.tracks?.filter(t => {
+        const tArtist = Array.isArray(t.artists) ? t.artists.join(' ') : t.artist || ''
+        return tArtist.toLowerCase().includes(artistName.toLowerCase())
+      }) || []
+
+      let html = `
+        <div class="search-container">
+          <button class="btn-back" onclick="backToSearchResults()">${icons.back} Back to results</button>
+          <div class="album-detail">
+            <div class="album-detail-header">
+              <div class="album-detail-info">
+                <h1>${escHtml(artistName)}</h1>
+                <p class="album-detail-meta">${albums.length} albums · ${tracks.length} tracks</p>
+              </div>
+            </div>
+      `
+
+      if (albums.length) {
+        html += `<h4 class="search-subtitle" style="margin-top:16px">Albums</h4><div class="search-compact">`
+        albums.forEach(a => {
+          const img = a.image_url || a.images?.[0]?.url || ''
+          const initial = (a.name || '?').charAt(0).toUpperCase()
+          const albumData = { type: 'album', raw: a }
+          const albumDataIdx = window._ssData.length
+          window._ssData.push(albumData)
+          const year = a.release_date?.substring(0, 4) || ''
+          html += `<div class="search-item search-item-clickable" onclick="showSsAlbum(${albumDataIdx})">
+            <div class="search-thumb-wrap">${
+              img
+                ? `<img class="search-thumb" src="${img}" alt="" loading="lazy" onerror="this.style.display='none';this.parentNode.querySelector('.search-thumb-fallback').style.display='flex'"><div class="search-thumb-fallback search-thumb-fallback-sq" style="display:none">${initial}</div>`
+                : `<div class="search-thumb-fallback search-thumb-fallback-sq">${initial}</div>`
+            }</div>
+            <div><strong>${escHtml(a.name)}</strong><span class="search-item-meta">${year ? ` · ${year}` : ''}</span></div>
+          </div>`
+        })
+        html += `</div>`
+      }
+
+      if (tracks.length) {
+        html += `<h4 class="search-subtitle" style="margin-top:16px">Tracks</h4><div class="track-list">`
+        tracks.forEach((t, i) => {
+          const trkDataIdx = window._ssData.length
+          window._ssData.push({ type: 'track', raw: t })
+          html += `
+            <div class="track-row">
+              <span class="track-num">${i + 1}</span>
+              <div class="track-info">
+                <div class="track-name">${escHtml(t.name)}</div>
+                <div class="track-artist">${escHtml(Array.isArray(t.artists) ? t.artists.join(', ') : t.artist || '')}</div>
+              </div>
+              <button class="btn btn-sm btn-secondary ss-wishlist-btn" data-idx="${trkDataIdx}">+ Wishlist</button>
+            </div>`
+        })
+        html += `</div>`
+      }
+
+      if (!albums.length && !tracks.length) {
+        html += `<div class="empty-state">No results found for this artist on SoulSync</div>`
+      }
+
+      html += `</div></div>`
       el.innerHTML = html
     } catch (e) {
       el.innerHTML = `<div class="error-msg">${e.message}</div>`
@@ -2088,6 +2174,15 @@
         npOverlayArtist.textContent = [t.artist, t.artist_name, t.albumArtist].filter(Boolean).join(' · ')
         npOverlayAlbum.textContent = t.albumName || t.album || ''
         npOverlayCover.src = t.coverUrl || ''
+        const displayDur = state.duration || state.trackDuration || 0
+        if (npDuration) npDuration.textContent = player.formatTime(displayDur)
+        if (npOverlayDuration) npOverlayDuration.textContent = player.formatTime(displayDur)
+        progressBar.value = 0
+        if (progressFill) progressFill.style.width = '0%'
+        if (npOverlayProgress) npOverlayProgress.value = 0
+        if (state.duration && t.duration !== Math.round(state.duration)) {
+          t.duration = Math.round(state.duration)
+        }
       }
     })
 

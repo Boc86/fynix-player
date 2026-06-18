@@ -345,6 +345,10 @@ class MainActivity : AppCompatActivity() {
     try { localStorage.removeItem('navidrome_proxy'); } catch(e) {}
     if (window.__navidrome) window.__navidrome.proxyUrl = '';
 
+    // Set SoulSync proxy to embedded local server (always localhost:8080 on Android)
+    try { localStorage.setItem('soulsync_proxy', 'http://localhost:8080'); } catch(e) {}
+    if (window.soulsync) window.soulsync.proxyUrl = 'http://localhost:8080';
+
     // Set MP3 transcoding for Android WebView (FLAC not supported)
     try { localStorage.setItem('navidrome_stream_format', 'mp3'); } catch(e) {}
     if (window.__navidrome) window.__navidrome.streamFormat = 'mp3';

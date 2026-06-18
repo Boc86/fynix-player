@@ -43,6 +43,8 @@ html, body {
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
+  overflow-x: hidden;
+  max-width: 100vw;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -248,7 +250,7 @@ html, body {
   grid-row: 2;
 }
 
-.view { display: block; }
+.view { display: block; max-width: 100%; overflow-x: hidden; }
 .view.hidden { display: none; }
 
 /* ===== Now Playing Bar ===== */
@@ -1331,6 +1333,8 @@ code {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 /* ===== Library View ===== */

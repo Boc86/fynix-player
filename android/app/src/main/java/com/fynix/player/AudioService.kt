@@ -282,7 +282,7 @@ class AudioService : android.app.Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        updateNotification()
+        startForeground(NOTIFICATION_ID, buildNotification())
         return START_STICKY
     }
 
