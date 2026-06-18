@@ -1,12 +1,12 @@
 # Fynix Player
 
-A self-contained Android music player that connects to [Navidrome](https://www.navidrome.org/) and [SoulSync](https://github.com/Nezreka/SoulSync) for browsing, streaming, and downloading music. Built as a WebView wrapper with a custom embedded server — no external dependencies on the phone.
+A light-weight, self-contained Android music player that connects to [Navidrome](https://www.navidrome.org/) and [SoulSync](https://github.com/Nezreka/SoulSync) for browsing, streaming, and downloading music. Built as a WebView wrapper with a custom embedded server — no external dependencies on the phone.
 
 ## Features
 
 - **Navidrome streaming** — browse albums, artists, playlists; search tracks; stream via MP3 transcoding
 - **SoulSync wishlist** — search SoulSync for tracks/albums/artists, add to wishlist, download directly into your Navidrome library
-- **Navidrome → SoulSync flow** — one-tap add any Navidrome album to your SoulSync wishlist
+- **Navidrome → SoulSync flow** — one-tap add any album to your SoulSync wishlist
 - **Queue management** — play, shuffle, repeat, seek, volume control
 - **Shuffle All** — shuffle your entire library from the app or Android Auto
 - **Rich metadata** — artist bios via MusicBrainz + Wikipedia, album details, clickable artist/album links throughout
