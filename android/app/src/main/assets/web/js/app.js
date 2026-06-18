@@ -33,7 +33,8 @@
     download: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
     delete: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
     playlist: '<svg viewBox="0 0 24 24"><path d="M14 10H3v2h11v-2zm0-4H3v2h11V6zM3 16h7v-2H3v2zm11-1v6l5-3-5-3z"/></svg>',
-    menu: '<svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>'
+    menu: '<svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>',
+    info: '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>'
   }
 
   function init() {
@@ -74,18 +75,20 @@
     const dur = track.duration || 0
     const pct = dur ? (savedTime / dur) * 100 : 0
     const titleText = track.title || track.name || 'Unknown'
-    const artistText = [track.artist, track.artist_name, track.albumArtist, track.albumName].filter(Boolean).join(' · ')
+    const artistText = [...new Set([track.artist, track.artist_name, track.albumArtist].filter(Boolean))].join(' · ')
+    const albumNameText = track.albumName || track.album || ''
     const coverSrc = track.coverUrl || ''
     const byId = id => document.getElementById(id)
     // Bottom bar
     const nt = byId('np-title'); if (nt) nt.textContent = titleText
-    const na = byId('np-artist'); if (na) na.textContent = artistText
+    const na = byId('np-artist'); if (na) na.innerHTML = artistText ? `<a class="meta-link" onclick="event.stopPropagation();showArtistFromNowPlaying()">${escHtml(artistText)}</a>` : ''
+    const nab = byId('np-album'); if (nab) nab.innerHTML = albumNameText ? `<a class="meta-link" onclick="event.stopPropagation();showAlbumFromNowPlaying()">${escHtml(albumNameText)}</a>` : ''
     const nc = byId('np-cover'); if (nc) nc.src = coverSrc
     // Now playing overlay
     const noc = byId('np-overlay-cover'); if (noc) noc.src = coverSrc
     const not = byId('np-overlay-title'); if (not) not.textContent = titleText
-    const noa = byId('np-overlay-artist'); if (noa) noa.textContent = artistText
-    const noab = byId('np-overlay-album'); if (noab) noab.textContent = track.albumName || track.album || ''
+    const noal = byId('np-overlay-artist-link'); if (noal) { noal.textContent = artistText; noal.onclick = () => window.showArtistFromNowPlaying() }
+    const noabl = byId('np-overlay-album-link'); if (noabl) { noabl.textContent = albumNameText; noabl.onclick = () => window.showAlbumFromNowPlaying() }
     // Progress
     const pb = byId('progress-bar'); if (pb) pb.value = pct
     const pf = byId('np-progress-fill'); if (pf) pf.style.width = pct + '%'
@@ -173,6 +176,13 @@
         <div class="view hidden" id="view-settings"></div>
         <div class="view hidden" id="view-queue"></div>
         <div class="view hidden" id="view-playlists"></div>
+        <div class="bio-modal" id="bio-modal" onclick="closeBioModal()">
+          <div class="bio-modal-content" onclick="event.stopPropagation()">
+            <button class="bio-modal-close" onclick="closeBioModal()">&times;</button>
+            <h3 class="bio-modal-title"></h3>
+            <div class="bio-modal-text"></div>
+          </div>
+        </div>
       </main>
 
       <footer class="now-playing-bar" id="now-playing-bar">
@@ -182,6 +192,7 @@
           <div class="np-info">
             <div class="np-title" id="np-title">No track</div>
             <div class="np-artist" id="np-artist"></div>
+            <div class="np-album" id="np-album"></div>
           </div>
         </div>
         <div class="np-center">
@@ -222,8 +233,8 @@
           </div>
           <div class="np-overlay-info">
             <div class="np-overlay-track" id="np-overlay-title">No track</div>
-            <div class="np-overlay-artist" id="np-overlay-artist"></div>
-            <div class="np-overlay-album" id="np-overlay-album"></div>
+            <div class="np-overlay-artist" id="np-overlay-artist"><a class="meta-link" id="np-overlay-artist-link"></a></div>
+            <div class="np-overlay-album" id="np-overlay-album"><a class="meta-link" id="np-overlay-album-link"></a></div>
           </div>
           <div class="np-overlay-progress">
             <input type="range" class="progress-bar" id="np-overlay-progress" min="0" max="100" value="0">
@@ -322,10 +333,26 @@
     const el = $('#now-playing-screen')
     if (!t) return
     const displayDur = state.duration || state.trackDuration || 0
+    const artistName = [...new Set([t.artist, t.artist_name, t.albumArtist].filter(Boolean))].join(' · ')
+    const albumName = t.albumName || t.album || ''
+    const artistId = t.artistId || ''
+    const albumId = t.albumId || ''
+
     $('#np-overlay-cover').src = t.coverUrl || ''
     $('#np-overlay-title').textContent = t.title || t.name || 'Unknown'
-    $('#np-overlay-artist').textContent = [t.artist, t.artist_name, t.albumArtist].filter(Boolean).join(' · ')
-    $('#np-overlay-album').textContent = t.albumName || t.album || ''
+
+    const al = $('#np-overlay-artist-link')
+    if (al) {
+      al.textContent = artistName
+      al.onclick = () => showArtistFromNowPlaying()
+    }
+
+    const abl = $('#np-overlay-album-link')
+    if (abl) {
+      abl.textContent = albumName
+      abl.onclick = () => showAlbumFromNowPlaying()
+    }
+
     $('#np-overlay-play').innerHTML = state.playing ? icons.pause : icons.play
     $('#np-overlay-progress').value = displayDur ? (state.currentTime / displayDur) * 100 : 0
     $('#np-overlay-current').textContent = player.formatTime(state.currentTime)
@@ -333,6 +360,15 @@
     $('#np-overlay-volume').value = state.volume
     $('#np-ctrl-shuffle').style.opacity = state.shuffle ? '1' : '0.4'
     $('#np-ctrl-repeat').style.opacity = state.repeat ? '1' : '0.4'
+
+    const nab = $('#np-album')
+    if (nab) {
+      nab.innerHTML = albumName ? `<a class="meta-link" onclick="event.stopPropagation();showAlbumFromNowPlaying()">${escHtml(albumName)}</a>` : ''
+    }
+    const na = $('#np-artist')
+    if (na) {
+      na.innerHTML = artistName ? `<a class="meta-link" onclick="event.stopPropagation();showArtistFromNowPlaying()">${escHtml(artistName)}</a>` : ''
+    }
   }
 
   function showSnackbar(msg, type = 'success') {
@@ -527,7 +563,7 @@
         content.innerHTML = `<div class="artist-grid">${artists.map(a => {
           const cover = navidrome.coverUrl(a.id, 160)
           return `
-          <div class="artist-card" onclick="filterArtist('${escHtml(a.name)}')">
+          <div class="artist-card" onclick="showArtist('${a.id}','${escHtml(a.name).replace(/'/g, "\\'")}')">
             <img class="artist-cover-img" src="${cover}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
             <div class="artist-cover" style="display:none">${escHtml(a.name.charAt(0).toUpperCase())}</div>
             <div class="artist-name">${escHtml(a.name)}</div>
@@ -563,7 +599,7 @@
               <span class="track-num">${i + 1}</span>
               <div class="track-info">
                 <div class="track-name">${escHtml(t.title)}</div>
-                <div class="track-artist">${escHtml(t.artist || '')} · ${escHtml(t.album || '')}</div>
+                <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist(null,'${escHtml(t.artist || '').replace(/'/g, "\\'")}')">${escHtml(t.artist || '')}</a> · <a class="meta-link" onclick="event.stopPropagation();showAlbum(null,'${escHtml(t.album || '').replace(/'/g, "\\'")}','${escHtml(t.artist || '').replace(/'/g, "\\'")}')">${escHtml(t.album || '')}</a></div>
               </div>
               <span class="track-duration">${player.formatTime(t.duration)}</span>
             </div>
@@ -608,43 +644,103 @@
     }
   }
 
-  async function showArtist(id) {
+  async function showArtist(id, artistName) {
+    previousView = currentView
+    currentView = 'artists'
+    $$('.view').forEach(v => v.classList.add('hidden'))
     const el = $('#view-artists')
+    el.classList.remove('hidden')
     el.innerHTML = '<div class="loading"><div class="loading-spinner"></div> Loading...</div>'
-    try {
-      const resp = await navidrome.getArtist(id)
-      const artist = resp?.artist
-      const albums = artist?.album || []
-      const cover = albums[0] ? navidrome.coverUrl(albums[0].id, 300) : ''
-      el.innerHTML = `
-        <button class="btn-back" onclick="renderArtists()">${icons.back} Back</button>
-        <div class="artist-detail">
-          <div class="artist-detail-header">
-            <img class="artist-detail-img" src="${cover}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-            <div class="artist-cover artist-cover-lg" style="display:${cover ? 'none' : 'flex'}">${escHtml(artist.name.charAt(0).toUpperCase())}</div>
-            <div class="artist-detail-info">
-              <h2>${escHtml(artist.name)}</h2>
-              <p>${artist.albumCount} albums</p>
-            </div>
-          </div>
-          <h3 class="section-title">Albums</h3>
-          <div class="album-grid">${albums.map(a => `
-            <div class="album-card" onclick="showAlbum('${a.id}')">
-              <div class="album-art">
-                <img src="${navidrome.coverUrl(a.id, 300)}" alt="${escHtml(a.name)}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 300 300%22><rect fill=%22%23333%22 width=%22300%22 height=%22300%22/><text fill=%22%23999%22 font-size=%2280%22 x=%22150%22 y=%22170%22 text-anchor=%22middle%22 font-family=%22monospace%22>&#x266C;</text></svg>'">
-                <div class="album-play-overlay">${icons.play}</div>
-              </div>
-              <div class="album-name">${escHtml(a.name)}</div>
-              <div class="album-artist">${escHtml(a.artist || '')}</div>
-              ${a.year ? `<div class="album-year">${a.year}</div>` : ''}
-              <button class="btn btn-sm btn-secondary wishlist-btn" onclick="event.stopPropagation();addAlbumToWishlist('${a.id}','${escHtml(a.name).replace(/'/g, "\\'")}','${escHtml(a.artist || '').replace(/'/g, "\\'")}')">❤ Wishlist</button>
-            </div>
-          `).join('')}</div>
-        </div>
-      `
-    } catch (e) {
-      el.innerHTML = `<div class="error-msg">${e.message}</div>`
+
+    let artist, albums
+    let found = false
+
+    if (id) {
+      try {
+        const resp = await navidrome.getArtist(id)
+        artist = resp?.artist
+        if (artist) {
+          albums = artist?.album || []
+          artistName = artist.name
+          found = true
+        }
+      } catch {}
     }
+
+    if (!found && artistName) {
+      try {
+        const searchResp = await navidrome.search3(artistName, 5, 0, 0)
+        const matches = searchResp?.searchResult3?.artist || []
+        const match = matches.find(a =>
+          a.name?.toLowerCase() === artistName.toLowerCase()
+        ) || matches[0]
+        if (match) {
+          id = match.id
+          const resp = await navidrome.getArtist(id)
+          artist = resp?.artist
+          if (artist) {
+            albums = artist?.album || []
+            artistName = artist.name
+            found = true
+          }
+        }
+      } catch {}
+    }
+
+    const cover = id ? navidrome.coverUrl(id, 300) : (albums?.[0] ? navidrome.coverUrl(albums[0].id, 300) : '')
+
+    const mbid = artist?.musicBrainzId || ''
+    const mb = await _fetchMBInfo(artistName || '', mbid)
+
+    const hasBio = mb?.wikiTitle || (artistName && !mb?.wikiTitle)
+    const tagsHtml = mb?.tags?.length
+      ? `<div class="artist-tags">${mb.tags.map(t =>
+          `<span class="tag">${escHtml(t)}</span>`
+        ).join('')}</div>`
+      : ''
+
+    let html = `
+      <button class="btn-back" onclick="renderArtists()">${icons.back} Back</button>
+      <div class="artist-detail">
+        <div class="artist-detail-header">
+          <img class="artist-detail-img" src="${cover}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+          <div class="artist-cover artist-cover-lg" style="display:${cover ? 'none' : 'flex'}">${(artistName || '?').charAt(0).toUpperCase()}</div>
+          <div class="artist-detail-info">
+            <h2>${escHtml(artistName || 'Unknown')}</h2>
+            <p>${found ? `${artist?.albumCount || albums?.length || 0} albums` : 'Unknown'}${mb?.country ? ` · ${mb.country}` : ''}${mb?.begin ? ` · ${mb.begin}${mb?.end ? `-${mb.end}` : ''}` : ''}</p>
+            ${tagsHtml}
+          </div>
+        </div>
+    `
+
+    if (hasBio) {
+      html += `<button class="btn-bio" onclick="showBioModal('${escHtml(artistName || '').replace(/'/g, "\\'")}')">${icons.info} Bio</button>`
+    }
+    if (artistName) {
+      html += `<button class="btn-bio btn-bio--alt" onclick="searchDiscography('${escHtml(artistName || '').replace(/'/g, "\\'")}')">${icons.search} Discography</button>`
+    }
+
+    if (found && albums?.length) {
+      html += `
+        <h3 class="section-title">Albums</h3>
+        <div class="album-grid">${albums.map(a => `
+          <div class="album-card" onclick="showAlbum('${a.id}')">
+            <div class="album-art">
+              <img src="${navidrome.coverUrl(a.id, 300)}" alt="${escHtml(a.name)}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 300 300%22><rect fill=%22%23333%22 width=%22300%22 height=%22300%22/><text fill=%22%23999%22 font-size=%2280%22 x=%22150%22 y=%22170%22 text-anchor=%22middle%22 font-family=%22monospace%22>&#x266C;</text></svg>'">
+              <div class="album-play-overlay">${icons.play}</div>
+            </div>
+            <div class="album-name">${escHtml(a.name)}</div>
+            <div class="album-artist">${escHtml(a.artist || '')}</div>
+            ${a.year ? `<div class="album-year">${a.year}</div>` : ''}
+          </div>
+        `).join('')}</div>
+      `
+    } else {
+      html += `<div class="empty-state">No albums found for this artist in library.</div>`
+    }
+
+    html += `</div>`
+    el.innerHTML = html
   }
 
   function albumCard(album) {
@@ -675,67 +771,232 @@
     return songs.reduce((sum, s) => sum + (s.duration || 0), 0)
   }
 
-  async function showAlbum(id) {
+  const _mbCache = {}
+  const _wikiCache = {}
+
+  async function _fetchMBInfo(artistName, mbid) {
+    if (!artistName && !mbid) return null
+    const key = mbid || artistName.toLowerCase().trim()
+    if (_mbCache[key] !== undefined) return _mbCache[key]
+
+    try {
+      let id = mbid
+      if (!id) {
+        const searchUrl = `https://musicbrainz.org/ws/2/artist/?query=artist:${encodeURIComponent(artistName)}&fmt=json`
+        const sr = await fetch(searchUrl, { headers: { 'User-Agent': 'FynixPlayer/0.2.1 (boc86@users.noreply.github.com)' } })
+        if (!sr.ok) { _mbCache[key] = null; return null }
+        const sd = await sr.json()
+        id = sd?.artists?.[0]?.id
+        if (!id) { _mbCache[key] = null; return null }
+      }
+
+      const detailUrl = `https://musicbrainz.org/ws/2/artist/${id}?inc=tags+url-rels&fmt=json`
+      const dr = await fetch(detailUrl, { headers: { 'User-Agent': 'FynixPlayer/0.2.1 (boc86@users.noreply.github.com)' } })
+      if (!dr.ok) { _mbCache[key] = null; return null }
+      const dd = await dr.json()
+
+      const rels = dd?.relations || []
+      let wikiTitle = ''
+
+      const wikiRel = rels.find(r => r.type === 'wikipedia' && r.url?.resource?.includes('wikipedia.org'))
+      if (wikiRel?.url?.resource) {
+        wikiTitle = wikiRel.url.resource.split('/wiki/').pop()
+      }
+
+      if (!wikiTitle) {
+        const wikidataRel = rels.find(r => r.type === 'wikidata' && r.url?.resource?.includes('wikidata.org'))
+        if (wikidataRel?.url?.resource) {
+          try {
+            const wdId = wikidataRel.url.resource.split('/wiki/').pop() || wikidataRel.url.resource.split('/').pop()
+            const wdUrl = `https://www.wikidata.org/wiki/Special:EntityData/${wdId}.json`
+            const wdr = await fetch(wdUrl)
+            if (wdr.ok) {
+              const wdd = await wdr.json()
+              const entity = wdd?.entities?.[wdId]
+              wikiTitle = entity?.sitelinks?.enwiki?.title || ''
+            }
+          } catch {}
+        }
+      }
+
+      const result = {
+        mbid: id,
+        tags: (dd?.tags || []).slice(0, 8).map(t => t.name),
+        type: dd?.type || '',
+        country: dd?.country || '',
+        begin: dd?.['life-span']?.begin || '',
+        end: dd?.['life-span']?.end || '',
+        wikiTitle
+      }
+      _mbCache[key] = result
+      return result
+    } catch {
+      _mbCache[key] = null
+      return null
+    }
+  }
+
+  async function _fetchWikipediaData(wikiTitle, artistName) {
+    const lookupName = artistName ? artistName.split(' · ')[0] : ''
+    const cacheKey = wikiTitle || lookupName.toLowerCase().trim()
+    if (_wikiCache[cacheKey]) return _wikiCache[cacheKey]
+
+    if (!wikiTitle && lookupName) {
+      const mbEntry = _mbCache[lookupName.toLowerCase().trim()]
+      if (mbEntry?.wikiTitle) wikiTitle = mbEntry.wikiTitle
+    }
+
+    let title = wikiTitle
+    let bio = ''
+    let thumbnail = ''
+
+    if (title) {
+      try {
+        const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(decodeURIComponent(title))}`
+        const r = await fetch(url)
+        if (r.ok) {
+          const d = await r.json()
+          bio = d?.extract || ''
+          thumbnail = d?.thumbnail?.source || ''
+        }
+      } catch {}
+    }
+
+    if (!bio && lookupName) {
+      try {
+        const searchUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(lookupName)}`
+        const wr = await fetch(searchUrl)
+        if (wr.ok) {
+          const wd = await wr.json()
+          if (wd?.title && wd?.extract) {
+            const titleLower = wd.title.toLowerCase()
+            const nameLower = lookupName.toLowerCase()
+            if (titleLower.includes(nameLower) || nameLower.includes(titleLower)) {
+              bio = wd.extract
+              thumbnail = wd?.thumbnail?.source || ''
+              if (!title) title = wd.title
+            }
+          }
+        }
+      } catch {}
+    }
+
+    const result = { bio, thumbnail, wikiTitle: title }
+    _wikiCache[cacheKey] = result
+    if (wikiTitle && lookupName) _wikiCache[lookupName.toLowerCase().trim()] = result
+    if (!wikiTitle && lookupName && title) _wikiCache[title.toLowerCase().trim()] = result
+    return result
+  }
+
+  async function showAlbum(id, albumName, artistName) {
     albumHistoryView = currentView
     const el = $('#view-albums')
     el.classList.remove('hidden')
     $('#view-home')?.classList.add('hidden')
     $('#view-artists')?.classList.add('hidden')
     el.innerHTML = '<div class="loading"><div class="loading-spinner"></div> Loading...</div>'
-    try {
-      const resp = await navidrome.getAlbum(id)
-      const album = resp?.album
-      const songs = album?.song || []
-      const cover = navidrome.coverUrl(album.id, 400)
 
-      const backTarget = albumHistoryView === 'home' ? 'home' : albumHistoryView === 'artists' ? 'artists' : 'albums'
+    let album, songs, cover
+    let found = false
 
-      const tracksHtml = songs.map((s, i) => `
-        <div class="track-row" onclick="playTrackFromAlbum(${i})" data-index="${i}">
-          <span class="track-num">${s.track || i + 1}</span>
-          <div class="track-info">
-            <div class="track-name">${escHtml(s.title)}</div>
-            <div class="track-artist">${escHtml(s.artist || album.artist || '')}</div>
-          </div>
-          <span class="track-duration">${player.formatTime(s.duration)}</span>
-        </div>
-      `).join('')
+    if (id) {
+      try {
+        const resp = await navidrome.getAlbum(id)
+        album = resp?.album
+        if (album) {
+          songs = album?.song || []
+          cover = navidrome.coverUrl(album.id, 400)
+          albumName = album.name
+          artistName = album.artist
+          found = true
+        }
+      } catch {}
+    }
 
-      window._currentAlbumSongs = songs.map(s => ({
-        ...s,
-        streamUrl: navidrome.streamUrl(s.id),
-        coverUrl: navidrome.coverUrl(s.id, 300),
-        albumName: album.name,
-        albumArtist: album.artist
-      }))
+    if (!found && albumName && artistName) {
+      try {
+        const searchResp = await navidrome.search3(`${albumName} ${artistName}`, 0, 5, 0)
+        const matches = searchResp?.searchResult3?.album || []
+        const match = matches.find(a =>
+          a.name?.toLowerCase() === albumName.toLowerCase() &&
+          a.artist?.toLowerCase().includes(artistName.toLowerCase())
+        ) || matches[0]
+        if (match) {
+          id = match.id
+          const resp = await navidrome.getAlbum(id)
+          album = resp?.album
+          if (album) {
+            songs = album?.song || []
+            cover = navidrome.coverUrl(album.id, 400)
+            albumName = album.name
+            artistName = album.artist
+            found = true
+          }
+        }
+      } catch {}
+    }
 
-      const totalDur = formatDuration(totalDuration(songs))
-      const metaParts = []
-      if (album.year) metaParts.push(album.year)
-      metaParts.push(`${songs.length} tracks`)
-      if (totalDur) metaParts.push(totalDur)
-      if (album.genre) metaParts.push(album.genre)
+    const backTarget = albumHistoryView === 'home' ? 'home' : albumHistoryView === 'artists' ? 'artists' : 'albums'
 
+    if (!found) {
       el.innerHTML = `
         <button class="btn-back" onclick="albumBack()">${icons.back} Back</button>
         <div class="album-detail">
-          <div class="album-detail-header">
-            <img class="album-detail-cover" src="${cover}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 300 300%22><rect fill=%22%23333%22 width=%22300%22 height=%22300%22/><text fill=%22%23999%22 font-size=%2280%22 x=%22150%22 y=%22170%22 text-anchor=%22middle%22 font-family=%22monospace%22>&#x266C;</text></svg>'">
-            <div class="album-detail-info">
-              <h1>${escHtml(album.name)}</h1>
-              <p class="album-detail-artist">${escHtml(album.artist || '')}</p>
-              <p class="album-detail-meta">${metaParts.join(' · ')}</p>
-              <div class="album-detail-actions">
-                <button class="btn btn-primary" onclick="playAll()">${icons.play} Play All</button>
-              </div>
-            </div>
+          <div class="album-detail-info" style="padding:24px 0">
+            <h1>${escHtml(albumName || 'Unknown Album')}</h1>
+            <p class="album-detail-artist" style="cursor:pointer;color:var(--primary)" onclick="showArtist(null,'${escHtml(artistName || '').replace(/'/g, "\\'")}')">${escHtml(artistName || '')}</p>
           </div>
-          <div class="track-list">${tracksHtml}</div>
         </div>
       `
-    } catch (e) {
-      el.innerHTML = `<div class="error-msg">${e.message}</div>`
+      return
     }
+
+    const tracksHtml = songs.map((s, i) => `
+      <div class="track-row" onclick="playTrackFromAlbum(${i})" data-index="${i}">
+        <span class="track-num">${s.track || i + 1}</span>
+        <div class="track-info">
+          <div class="track-name">${escHtml(s.title)}</div>
+          <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist('${escHtml(s.artistId || '')}','${escHtml(s.artist || album.artist || '').replace(/'/g, "\\'")}')">${escHtml(s.artist || album.artist || '')}</a></div>
+        </div>
+        <span class="track-duration">${player.formatTime(s.duration)}</span>
+      </div>
+    `).join('')
+
+    window._currentAlbumSongs = songs.map(s => ({
+      ...s,
+      streamUrl: navidrome.streamUrl(s.id),
+      coverUrl: navidrome.coverUrl(s.id, 300),
+      albumName: album.name,
+      albumArtist: album.artist
+    }))
+
+    const totalDur = formatDuration(totalDuration(songs))
+    const metaParts = []
+    if (album.year) metaParts.push(album.year)
+    metaParts.push(`${songs.length} tracks`)
+    if (totalDur) metaParts.push(totalDur)
+    if (album.genre) metaParts.push(album.genre)
+
+    const artistEscaped = escHtml(artistName || '').replace(/'/g, "\\'")
+    const artistId = album.artistId || ''
+
+    el.innerHTML = `
+      <button class="btn-back" onclick="albumBack()">${icons.back} Back</button>
+      <div class="album-detail">
+        <div class="album-detail-header">
+          <img class="album-detail-cover" src="${cover}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 300 300%22><rect fill=%22%23333%22 width=%22300%22 height=%22300%22/><text fill=%22%23999%22 font-size=%2280%22 x=%22150%22 y=%22170%22 text-anchor=%22middle%22 font-family=%22monospace%22>&#x266C;</text></svg>'">
+          <div class="album-detail-info">
+            <h1>${escHtml(albumName)}</h1>
+            <p class="album-detail-artist"><a class="meta-link" onclick="showArtist('${artistId}','${artistEscaped}')">${escHtml(artistName || '')}</a></p>
+            <p class="album-detail-meta">${metaParts.join(' · ')}</p>
+            <div class="album-detail-actions">
+              <button class="btn btn-primary" onclick="playAll()">${icons.play} Play All</button>
+            </div>
+          </div>
+        </div>
+        <div class="track-list">${tracksHtml}</div>
+      </div>
+    `
   }
 
   function albumBack() {
@@ -862,12 +1123,62 @@
   window.renderHome = renderHome
   window.showArtist = showArtist
   window.showAlbum = showAlbum
+  window.showArtistFromNowPlaying = function () {
+    const t = player.getState().currentTrack
+    if (!t) return
+    const id = t.artistId || null
+    const name = t.artist || t.artist_name || t.albumArtist || ''
+    hideNowPlaying()
+    showArtist(id, name)
+  }
+  window.showAlbumFromNowPlaying = function () {
+    const t = player.getState().currentTrack
+    if (!t) return
+    const id = t.albumId || null
+    const name = t.albumName || t.album || ''
+    const artist = t.artist || t.artist_name || ''
+    hideNowPlaying()
+    showAlbum(id, name, artist)
+  }
   window.navigate = navigate
   window.showNowPlaying = showNowPlaying
   window.hideNowPlaying = hideNowPlaying
   window.albumBack = albumBack
   window.playTrackFromAlbum = playTrackFromAlbum
   window.playAll = playAll
+  window.showBioModal = showBioModal
+  window.closeBioModal = closeBioModal
+
+  function showBioModal(artistName) {
+    const modal = document.getElementById('bio-modal')
+    if (!modal) return
+    const titleEl = modal.querySelector('.bio-modal-title')
+    const textEl = modal.querySelector('.bio-modal-text')
+    if (titleEl) titleEl.textContent = artistName ? `About ${artistName}` : 'About'
+    if (textEl) textEl.innerHTML = '<div class="loading"><div class="loading-spinner"></div> Loading bio...</div>'
+    modal.classList.add('bio-modal--open')
+
+    _fetchWikipediaData('', artistName || '').then(wd => {
+      if (textEl) textEl.innerHTML = wd?.bio
+        ? wd.bio.split('\n').map(p => p.trim()).filter(Boolean).map(p => `<p>${escHtml(p)}</p>`).join('')
+        : '<p>No biography available.</p>'
+    })
+  }
+
+  function closeBioModal() {
+    const modal = document.getElementById('bio-modal')
+    if (modal) modal.classList.remove('bio-modal--open')
+  }
+
+  function searchDiscography(query) {
+    navigate('search')
+    const input = document.getElementById('search-input')
+    if (input) {
+      input.value = query
+      setTimeout(() => doSearch(), 100)
+    }
+  }
+  window.searchDiscography = searchDiscography
 
   function escHtml(s) {
     if (!s) return ''
@@ -1128,7 +1439,7 @@
               <span class="track-num">${s.track || i + 1}</span>
               <div class="track-info">
                 <div class="track-name">${escHtml(s.title)}</div>
-                <div class="track-artist">${escHtml(s.artist || '')} · ${escHtml(s.album || '')}</div>
+                <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist(null,'${escHtml(s.artist || '').replace(/'/g, "\\'")}')">${escHtml(s.artist || '')}</a> · <a class="meta-link" onclick="event.stopPropagation();showAlbum(null,'${escHtml(s.album || '').replace(/'/g, "\\'")}','${escHtml(s.artist || '').replace(/'/g, "\\'")}')">${escHtml(s.album || '')}</a></div>
               </div>
               <span class="track-duration">${player.formatTime(s.duration)}</span>
             </div>`
@@ -1204,7 +1515,7 @@
             }</div>
             <div>
               <strong>${escHtml(t.name || '')}</strong>
-              <span class="search-item-meta">· ${escHtml(t.artists?.join(', ') || '')} · ${escHtml(t.album || '')}</span>
+              <span class="search-item-meta">· <a class="meta-link" onclick="event.stopPropagation();showSsArtistByName('${escHtml((t.artists?.[0] || t.artist || '')).replace(/'/g, "\\'")}')">${escHtml(t.artists?.join(', ') || t.artist || '')}</a> · ${escHtml(t.album || '')}</span>
             </div>
             <button class="btn btn-sm btn-secondary ss-wishlist-btn" data-idx="${dataIdx}" style="margin-left:auto">+ Wishlist</button>
           </div>`
@@ -1471,6 +1782,7 @@
 
       const year = raw.release_date?.substring(0, 4) || ''
       const metaParts = [year, `${tracks.length} tracks`].filter(Boolean)
+      const artistHtml = artistNames.map(an => `<a class="meta-link" onclick="event.stopPropagation();showSsArtistByName('${escHtml(an).replace(/'/g, "\\'")}')">${escHtml(an)}</a>`).join(', ')
 
       let html = `
         <div class="search-container">
@@ -1479,7 +1791,7 @@
             <div class="album-detail-header">
               <div class="album-detail-info">
                 <h1>${escHtml(albumName)}</h1>
-                <p class="album-detail-artist">${escHtml(artistNames.join(', '))}</p>
+                <p class="album-detail-artist">${artistHtml}</p>
                 <p class="album-detail-meta">${metaParts.join(' · ')}</p>
                 <div class="album-detail-actions">
                   <button class="btn btn-primary" onclick="addAllAlbumTracks(this)">${icons.plus} Add All to Wishlist</button>
@@ -1492,12 +1804,13 @@
       tracks.forEach((track, i) => {
         const trackDataIdx = window._ssData.length
         window._ssData.push({ type: 'track', raw: track })
+        const tArtist = track.artists?.join(', ') || ''
         html += `
           <div class="track-row">
             <span class="track-num">${i + 1}</span>
             <div class="track-info">
               <div class="track-name">${escHtml(track.name)}</div>
-              <div class="track-artist">${escHtml(track.artists?.join(', ') || '')}</div>
+              <div class="track-artist">${tArtist ? `<a class="meta-link" onclick="event.stopPropagation();showSsArtistFromTrack(${trackDataIdx})">${escHtml(tArtist)}</a>` : ''}</div>
             </div>
             <button class="btn btn-sm btn-secondary ss-wishlist-btn" data-idx="${trackDataIdx}">+ Wishlist</button>
           </div>`
@@ -1529,25 +1842,26 @@
         soulsync.searchTracks(artistName, 50).catch(() => null)
       ])
 
-      const albums = albumResp?.data?.albums?.filter(a =>
-        a.artists?.some(ar => ar.toLowerCase() === artistName.toLowerCase())
-      ) || []
+      const albums = albumResp?.data?.albums?.filter(a => {
+        const artists = a.artists || []
+        return artists.some(ar =>
+          ar.toLowerCase().includes(artistName.toLowerCase()) ||
+          artistName.toLowerCase().includes(ar.toLowerCase())
+        )
+      }) || []
 
       const tracks = trackResp?.data?.tracks?.filter(t => {
         const tArtist = Array.isArray(t.artists) ? t.artists.join(' ') : t.artist || ''
-        return tArtist.toLowerCase().includes(artistName.toLowerCase())
+        return tArtist.toLowerCase().includes(artistName.toLowerCase()) ||
+               artistName.toLowerCase().includes(tArtist.toLowerCase())
       }) || []
 
+      const ssMbid = raw.musicbrainz_id || raw.mbid || raw.external_ids?.musicbrainz || ''
+      const mb = await _fetchMBInfo(artistName, ssMbid)
       let html = `
         <div class="search-container">
           <button class="btn-back" onclick="backToSearchResults()">${icons.back} Back to results</button>
-          <div class="album-detail">
-            <div class="album-detail-header">
-              <div class="album-detail-info">
-                <h1>${escHtml(artistName)}</h1>
-                <p class="album-detail-meta">${albums.length} albums · ${tracks.length} tracks</p>
-              </div>
-            </div>
+          <h2 class="view-title">${escHtml(artistName)}</h2>
       `
 
       if (albums.length) {
@@ -1576,12 +1890,13 @@
         tracks.forEach((t, i) => {
           const trkDataIdx = window._ssData.length
           window._ssData.push({ type: 'track', raw: t })
+          const tArtist = Array.isArray(t.artists) ? t.artists.join(', ') : t.artist || ''
           html += `
             <div class="track-row">
               <span class="track-num">${i + 1}</span>
               <div class="track-info">
                 <div class="track-name">${escHtml(t.name)}</div>
-                <div class="track-artist">${escHtml(Array.isArray(t.artists) ? t.artists.join(', ') : t.artist || '')}</div>
+                <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showSsArtistFromTrack(${trkDataIdx})">${escHtml(tArtist)}</a></div>
               </div>
               <button class="btn btn-sm btn-secondary ss-wishlist-btn" data-idx="${trkDataIdx}">+ Wishlist</button>
             </div>`
@@ -1590,7 +1905,7 @@
       }
 
       if (!albums.length && !tracks.length) {
-        html += `<div class="empty-state">No results found for this artist on SoulSync</div>`
+        html += `<div class="empty-state">No albums or tracks found for this artist on SoulSync</div>`
       }
 
       html += `</div></div>`
@@ -1598,6 +1913,24 @@
     } catch (e) {
       el.innerHTML = `<div class="error-msg">${e.message}</div>`
     }
+  }
+
+  window.showSsArtistFromTrack = function (dataIdx) {
+    const data = window._ssData?.[dataIdx]
+    if (!data) return
+    const t = data.raw
+    const artistName = Array.isArray(t.artists) ? t.artists[0] : t.artist || ''
+    if (!artistName) return
+    showSsArtistByName(artistName)
+  }
+
+  window.showSsArtistByName = async function (artistName) {
+    if (!artistName) return
+    const data = { type: 'artist', raw: { name: artistName } }
+    window._ssData = window._ssData || []
+    const dataIdx = window._ssData.length
+    window._ssData.push(data)
+    showSsArtist(dataIdx)
   }
 
   function renderQueue() {
@@ -1619,12 +1952,14 @@
     `
     state.queue.forEach((track, i) => {
       const isCurrent = i === state.currentIndex
+      const artistText = escHtml(track.artist || track.artist_name || track.albumArtist || '').replace(/'/g, "\\'")
+      const albumText = escHtml(track.albumName || track.album || '').replace(/'/g, "\\'")
       html += `
         <div class="track-row ${isCurrent ? 'track-active' : ''}" onclick="jumpToQueueIndex(${i})">
           <span class="track-num">${isCurrent ? icons.play : (i + 1)}</span>
           <div class="track-info">
             <div class="track-name">${escHtml(track.title || track.name || 'Unknown')}</div>
-            <div class="track-artist">${escHtml(track.artist || track.artist_name || track.albumArtist || '')}</div>
+            <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist(null,'${artistText}')">${escHtml(track.artist || track.artist_name || track.albumArtist || '')}</a></div>
           </div>
           <button class="icon-btn" onclick="event.stopPropagation();removeFromQueue(${i})" title="Remove">${icons.close}</button>
         </div>
@@ -2167,12 +2502,18 @@
     player.on('loaded', state => {
       const t = state.currentTrack
       if (t) {
+        const artistText = [...new Set([t.artist, t.artist_name, t.albumArtist].filter(Boolean))].join(' · ')
+        const albumNameText = t.albumName || t.album || ''
         npTitle.textContent = t.title || t.name || 'Unknown'
-        npArtist.textContent = [t.artist, t.artist_name, t.albumArtist, t.albumName].filter(Boolean).join(' · ')
+        npArtist.innerHTML = artistText ? `<a class="meta-link" onclick="event.stopPropagation();showArtistFromNowPlaying()">${escHtml(artistText)}</a>` : ''
+        const nab = document.getElementById('np-album')
+        if (nab) nab.innerHTML = albumNameText ? `<a class="meta-link" onclick="event.stopPropagation();showAlbumFromNowPlaying()">${escHtml(albumNameText)}</a>` : ''
         npCover.src = t.coverUrl || ''
         npOverlayTitle.textContent = t.title || t.name || 'Unknown'
-        npOverlayArtist.textContent = [t.artist, t.artist_name, t.albumArtist].filter(Boolean).join(' · ')
-        npOverlayAlbum.textContent = t.albumName || t.album || ''
+        const noaL = document.getElementById('np-overlay-artist-link')
+        if (noaL) { noaL.textContent = artistText; noaL.onclick = () => showArtistFromNowPlaying() }
+        const noabL = document.getElementById('np-overlay-album-link')
+        if (noabL) { noabL.textContent = albumNameText; noabL.onclick = () => showAlbumFromNowPlaying() }
         npOverlayCover.src = t.coverUrl || ''
         const displayDur = state.duration || state.trackDuration || 0
         if (npDuration) npDuration.textContent = player.formatTime(displayDur)

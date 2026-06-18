@@ -319,6 +319,170 @@ html, body {
   text-overflow: ellipsis;
 }
 
+.np-album {
+  font-size: 0.6rem;
+  color: var(--text3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artist-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.tag {
+  display: inline-block;
+  background: var(--bg3);
+  color: var(--text2);
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.btn-bio {
+  background: none;
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  transition: background 0.15s;
+}
+
+.btn-bio:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn-bio--alt {
+  border-color: var(--text2);
+  color: var(--text2);
+  margin-left: 8px;
+}
+
+.btn-bio--alt:hover {
+  background: var(--bg3);
+  border-color: var(--text1);
+  color: var(--text1);
+}
+
+.btn-bio svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+/* Bio Modal */
+.bio-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0,0,0,0.6);
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.bio-modal--open {
+  display: flex;
+}
+
+.bio-modal-content {
+  background: var(--bg1);
+  border-radius: var(--radius);
+  max-width: 600px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 24px;
+  position: relative;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+
+.bio-modal-close {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+}
+
+.bio-modal-close:hover {
+  color: var(--text1);
+}
+
+.bio-modal-title {
+  font-size: 1.1rem;
+  margin: 0 0 16px;
+  padding-right: 30px;
+  color: var(--text1);
+}
+
+.bio-modal-text {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text2);
+}
+
+.bio-modal-text p {
+  margin: 0 0 10px;
+}
+
+.bio-modal-text p:last-child {
+  margin-bottom: 0;
+}
+
+.meta-link {
+  color: var(--primary);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.meta-link:hover {
+  text-decoration: underline;
+}
+
+.track-artist .meta-link {
+  color: var(--text2);
+}
+
+.track-artist .meta-link:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.np-overlay-artist .meta-link {
+  color: var(--text2);
+}
+
+.np-overlay-artist .meta-link:hover {
+  color: var(--primary);
+}
+
+.np-overlay-album .meta-link {
+  color: var(--text3);
+}
+
+.np-overlay-album .meta-link:hover {
+  color: var(--primary);
+}
+
 .np-center {
   display: flex;
   align-items: center;
