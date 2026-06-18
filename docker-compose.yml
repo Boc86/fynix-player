@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+
+  soulsync:
+    image: ghcr.io/nezreka/soulsync:latest
+    restart: unless-stopped
+    ports:
+      - "8008:8008"
+    environment:
+      - TZ=Europe/London
+    volumes:
+      - /mnt/music/downloads:/host/downloads
+      - /mnt/music/library:/host/music
+      - /mnt/music/incoming:/host/incoming
+      - music-stack_soulsync_config:/app/config
+      - /mnt/music-stack/soulsync/data:/app/data
+      - /mnt/music-stack/soulsync/logs:/app/logs
+      - /mnt/music-stack/soulsync/scripts:/app/scripts
+      - /mnt/music-stack/soulsync/transfer:/app/Transfer
+      - /mnt/music-stack/soulsync/musicvideos:/app/MusicVideos
+      - /mnt/music-stack/soulsync/downloads:/app/downloads
+
+  slskd:
+    image: slskd/slskd:latest
+    restart: unless-stopped
+    ports:
+      - "5030:5030"
+      - "5031:5031"
+      - "50300:50300"
+    environment:
+      - TZ=Europe/London
+    volumes:
+      - /mnt/music/slskd/slskd.yml:/app/slskd.yml
+      - /mnt/music:/music
+      - /mnt/music-stack/slskd/config:/app/config
+
+  navidrome:
+    image: deluan/navidrome:latest
+    user: "1000:1000"
+    restart: unless-stopped
+    ports:
+      - "4533:4533"
+    environment:
+      - ND_MUSICFOLDER=/music
+      - ND_DATAFOLDER=/data
+      - ND_SCANINTERVAL=1m
+      - ND_LOGLEVEL=info
+    volumes:
+      - /mnt/music/library:/music:ro
+      - /mnt/music-stack/navidrome/data:/data
+
+volumes:
+  music-stack_soulsync_config:

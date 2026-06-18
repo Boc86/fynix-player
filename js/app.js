@@ -97,12 +97,16 @@
     const op = byId('np-overlay-progress'); if (op) op.value = pct
     const oc = byId('np-overlay-current'); if (oc) oc.textContent = player.formatTime(savedTime)
     const od = byId('np-overlay-duration'); if (od) od.textContent = player.formatTime(dur)
-    // Play button
-    const cp = byId('ctrl-play'); if (cp) cp.innerHTML = wasPlaying ? icons.pause : icons.play
-    const np = byId('np-overlay-play'); if (np) np.innerHTML = wasPlaying ? icons.pause : icons.play
+    // Play button morph
+    const cpEl = byId('ctrl-play'); if (cpEl) cpEl.classList.toggle('is-playing', wasPlaying)
+    const npEl = byId('np-overlay-play'); if (npEl) npEl.classList.toggle('is-playing', wasPlaying)
     // Show now-playing bar
     const npb = byId('now-playing-bar')
     if (npb) npb.style.display = ''
+    // Background + color extraction
+    const bgImg = byId('np-overlay-bg-img')
+    if (bgImg) bgImg.src = coverSrc
+    _extractColors(coverSrc)
     // Load audio to get correct duration/currentTime, seek to saved position
     player._loadCurrent(wasPlaying)
   }
@@ -199,7 +203,7 @@
           <div class="np-controls">
             <button class="ctrl-btn" id="ctrl-shuffle" title="Shuffle">${icons.shuffle}</button>
             <button class="ctrl-btn" id="ctrl-prev" title="Previous">${icons.prev}</button>
-            <button class="ctrl-btn ctrl-play" id="ctrl-play" title="Play/Pause">${icons.play}</button>
+            <button class="ctrl-btn ctrl-play" id="ctrl-play" title="Play/Pause"><span class="icon-wrap"><span class="icon-play">${icons.play}</span><span class="icon-pause">${icons.pause}</span></span></button>
             <button class="ctrl-btn" id="ctrl-next" title="Next">${icons.next}</button>
             <button class="ctrl-btn" id="ctrl-repeat" title="Repeat">${icons.repeat}</button>
           </div>
@@ -222,6 +226,7 @@
       </nav>
 
       <div class="now-playing-screen" id="now-playing-screen">
+        <div class="np-overlay-bg" id="np-overlay-bg"><img id="np-overlay-bg-img" alt=""></div>
         <div class="np-overlay-header">
           <button class="icon-btn" id="np-back-btn" aria-label="Close">${icons.back}</button>
           <span class="np-overlay-title-text">Now Playing</span>
@@ -246,7 +251,7 @@
           <div class="np-overlay-controls">
             <button class="ctrl-btn" id="np-ctrl-shuffle" title="Shuffle">${icons.shuffle}</button>
             <button class="ctrl-btn" id="np-ctrl-prev" title="Previous">${icons.prev}</button>
-            <button class="ctrl-btn ctrl-play" id="np-overlay-play" title="Play/Pause">${icons.play}</button>
+            <button class="ctrl-btn ctrl-play" id="np-overlay-play" title="Play/Pause"><span class="icon-wrap"><span class="icon-play">${icons.play}</span><span class="icon-pause">${icons.pause}</span></span></button>
             <button class="ctrl-btn" id="np-ctrl-next" title="Next">${icons.next}</button>
             <button class="ctrl-btn" id="np-ctrl-repeat" title="Repeat">${icons.repeat}</button>
           </div>
@@ -292,9 +297,22 @@
     previousView = currentView
     currentView = view
     $$('.nav-item, .bottom-nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view))
+
+    const prevViewEl = $(`#view-${previousView}`)
+    if (prevViewEl && previousView) {
+      prevViewEl.classList.add('view-fade-out')
+      setTimeout(() => prevViewEl.classList.remove('view-fade-out'), 150)
+    }
+
     $$('.view').forEach(v => v.classList.add('hidden'))
     const target = $(`#view-${view}`)
-    if (target) target.classList.remove('hidden')
+    if (target) {
+      target.classList.remove('hidden')
+      target.classList.remove('view-fade-in')
+      // Force reflow
+      void target.offsetWidth
+      target.classList.add('view-fade-in')
+    }
     $('#sidebar').classList.remove('open')
     $('#sidebar-backdrop')?.classList.remove('show')
 
@@ -353,7 +371,7 @@
       abl.onclick = () => showAlbumFromNowPlaying()
     }
 
-    $('#np-overlay-play').innerHTML = state.playing ? icons.pause : icons.play
+    $('#np-overlay-play').classList.toggle('is-playing', state.playing)
     $('#np-overlay-progress').value = displayDur ? (state.currentTime / displayDur) * 100 : 0
     $('#np-overlay-current').textContent = player.formatTime(state.currentTime)
     $('#np-overlay-duration').textContent = player.formatTime(displayDur)
@@ -369,6 +387,9 @@
     if (na) {
       na.innerHTML = artistName ? `<a class="meta-link" onclick="event.stopPropagation();showArtistFromNowPlaying()">${escHtml(artistName)}</a>` : ''
     }
+    // Background image
+    const bgImg = document.getElementById('np-overlay-bg-img')
+    if (bgImg) bgImg.src = t.coverUrl || ''
   }
 
   function showSnackbar(msg, type = 'success') {
@@ -492,7 +513,8 @@
 
   async function loadLibraryTab() {
     const content = $('#library-content')
-    content.innerHTML = '<div class="loading"><div class="loading-spinner"></div> Loading...</div>'
+    const skelType = libraryState.tab === 'tracks' ? 'tracks' : libraryState.tab === 'artists' ? 'artists' : 'albums'
+    content.innerHTML = `<div class="${skelType === 'tracks' ? 'skel-list' : 'skel-grid'}">${_renderSkeletons(skelType)}</div>`
 
     try {
       switch (libraryState.tab) {
@@ -530,37 +552,76 @@
     loadLibraryTab()
   }
 
+  const BATCH_SIZE = 30
+  let _libObserver = null
+
   function renderLibraryContent() {
     const content = $('#library-content')
     if (!content) return
     const q = libraryState.search.toLowerCase()
 
+    let items, emptyMsg
     switch (libraryState.tab) {
       case 'albums': {
-        let albums = libraryState.albums || []
-        if (q) {
-          albums = albums.filter(a =>
-            (a.name || '').toLowerCase().includes(q) ||
-            (a.artist || '').toLowerCase().includes(q)
-          )
-        }
-        if (!albums.length) {
-          content.innerHTML = `<div class="empty-state">${q ? 'No matching albums' : 'No albums found'}</div>`
-          return
-        }
-        content.innerHTML = `<div class="album-grid">${albums.map(a => albumCard(a)).join('')}</div>`
+        items = (libraryState.albums || []).filter(a =>
+          !q || (a.name || '').toLowerCase().includes(q) ||
+               (a.artist || '').toLowerCase().includes(q)
+        )
+        emptyMsg = q ? 'No matching albums' : 'No albums found'
         break
       }
       case 'artists': {
-        let artists = libraryState.artists || []
-        if (q) {
-          artists = artists.filter(a => (a.name || '').toLowerCase().includes(q))
-        }
-        if (!artists.length) {
-          content.innerHTML = `<div class="empty-state">${q ? 'No matching artists' : 'No artists found'}</div>`
-          return
-        }
-        content.innerHTML = `<div class="artist-grid">${artists.map(a => {
+        items = (libraryState.artists || []).filter(a =>
+          !q || (a.name || '').toLowerCase().includes(q)
+        )
+        emptyMsg = q ? 'No matching artists' : 'No artists found'
+        break
+      }
+      case 'tracks': {
+        items = (libraryState.tracks || []).filter(t =>
+          !q || (t.title || '').toLowerCase().includes(q) ||
+               (t.artist || '').toLowerCase().includes(q) ||
+               (t.album || '').toLowerCase().includes(q)
+        )
+        const songsWithStream = items.map(s => ({
+          ...s,
+          streamUrl: navidrome.streamUrl(s.id),
+          coverUrl: navidrome.coverUrl(s.id, 100),
+          albumName: s.album || '',
+          albumArtist: s.artist || ''
+        }))
+        window._libraryTracks = songsWithStream
+        emptyMsg = q ? 'No matching tracks' : 'No tracks found'
+        break
+      }
+    }
+
+    if (!items || !items.length) {
+      content.innerHTML = `<div class="empty-state">${emptyMsg}</div>`
+      return
+    }
+
+    window._libItems = items
+    window._libPage = 0
+    _renderLibraryPage()
+  }
+
+  function _renderLibraryPage() {
+    const content = $('#library-content')
+    const items = window._libItems || []
+    const page = window._libPage || 0
+    const end = Math.min((page + 1) * BATCH_SIZE, items.length)
+    const slice = items.slice(0, end)
+    const hasMore = end < items.length
+
+    if (_libObserver) { _libObserver.disconnect(); _libObserver = null }
+
+    switch (libraryState.tab) {
+      case 'albums':
+        content.innerHTML = `<div class="album-grid">${slice.map(a => albumCard(a)).join('')}</div>`
+        break
+      case 'artists':
+        content.innerHTML = `<div class="artist-grid">${slice.map(a => {
           const cover = navidrome.coverUrl(a.id, 160)
           return `
           <div class="artist-card" onclick="showArtist('${a.id}','${escHtml(a.name).replace(/'/g, "\\'")}')">
@@ -571,30 +632,9 @@
           </div>`
         }).join('')}</div>`
         break
-      }
-      case 'tracks': {
-        let tracks = libraryState.tracks || []
-        if (q) {
-          tracks = tracks.filter(t =>
-            (t.title || '').toLowerCase().includes(q) ||
-            (t.artist || '').toLowerCase().includes(q) ||
-            (t.album || '').toLowerCase().includes(q)
-          )
-        }
-        if (!tracks.length) {
-          content.innerHTML = `<div class="empty-state">${q ? 'No matching tracks' : 'No tracks found'}</div>`
-          return
-        }
-        const songsWithStream = tracks.map(s => ({
-          ...s,
-          streamUrl: navidrome.streamUrl(s.id),
-          coverUrl: navidrome.coverUrl(s.id, 100),
-          albumName: s.album || '',
-          albumArtist: s.artist || ''
-        }))
-        window._libraryTracks = songsWithStream
+      case 'tracks':
         content.innerHTML = `
-          <div class="track-list">${tracks.map((t, i) => `
+          <div class="track-list">${slice.map((t, i) => `
             <div class="track-row" onclick="playLibraryTrack(${i})">
               <span class="track-num">${i + 1}</span>
               <div class="track-info">
@@ -605,7 +645,20 @@
             </div>
           `).join('')}</div>`
         break
-      }
+    }
+
+    if (hasMore) {
+      const sentinel = document.createElement('div')
+      sentinel.className = 'lib-sentinel'
+      sentinel.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>'
+      content.appendChild(sentinel)
+      _libObserver = new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting) {
+          window._libPage++
+          _renderLibraryPage()
+        }
+      }, { rootMargin: '300px' })
+      _libObserver.observe(sentinel)
     }
   }
 
@@ -650,7 +703,7 @@
     $$('.view').forEach(v => v.classList.add('hidden'))
     const el = $('#view-artists')
     el.classList.remove('hidden')
-    el.innerHTML = '<div class="loading"><div class="loading-spinner"></div> Loading...</div>'
+    el.innerHTML = _renderSkeletons('artists')
 
     let artist, albums
     let found = false
@@ -888,13 +941,57 @@
     return result
   }
 
+  function _extractColors(imgSrc) {
+    if (!imgSrc) return
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas')
+        c.width = 50; c.height = 50
+        const ctx = c.getContext('2d')
+        ctx.drawImage(img, 0, 0, 50, 50)
+        const d = ctx.getImageData(0, 0, 50, 50).data
+        const freq = {}
+        for (let i = 0; i < d.length; i += 4) {
+          const r = Math.round(d[i] / 32) * 32
+          const g = Math.round(d[i+1] / 32) * 32
+          const b = Math.round(d[i+2] / 32) * 32
+          const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+          if (lum < 30 || lum > 700) continue
+          const key = `${r},${g},${b}`
+          freq[key] = (freq[key] || 0) + 1
+        }
+        const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1])
+        if (!sorted.length) return
+        const [r, g, b] = sorted[0][0].split(',').map(Number)
+        document.documentElement.style.setProperty('--accent', `rgb(${r},${g},${b})`)
+        document.documentElement.style.setProperty('--accent-rgb', `${r},${g},${b}`)
+        document.documentElement.style.setProperty('--accent-dim', `rgba(${r},${g},${b},0.15)`)
+        document.documentElement.style.setProperty('--accent-glow', `rgba(${r},${g},${b},0.35)`)
+      } catch {}
+    }
+    img.src = imgSrc
+  }
+
+  function _renderSkeletons(type) {
+    const n = 12
+    if (type === 'tracks') {
+      return `<div class="skel-list">${Array(n).fill('<div class="skel-track"><div class="skel-track-num"></div><div class="skel-track-line"></div><div class="skel-track-dur"></div></div>').join('')}</div>`
+    }
+    if (type === 'artists') {
+      return `<div class="skel-grid">${Array(n).fill('<div class="skel-card"><div class="skel-artist-img"></div><div class="skel-line" style="margin:0 auto;width:60%"></div></div>').join('')}</div>`
+    }
+    return `<div class="skel-grid">${Array(n).fill('<div class="skel-card"><div class="skel-img"></div><div class="skel-line"></div><div class="skel-line-sm"></div></div>').join('')}</div>`
+  }
+
   async function showAlbum(id, albumName, artistName) {
     albumHistoryView = currentView
     const el = $('#view-albums')
     el.classList.remove('hidden')
     $('#view-home')?.classList.add('hidden')
     $('#view-artists')?.classList.add('hidden')
-    el.innerHTML = '<div class="loading"><div class="loading-spinner"></div> Loading...</div>'
+    el.innerHTML = _renderSkeletons('albums')
 
     let album, songs, cover
     let found = false
@@ -2504,17 +2601,18 @@
       if (t) {
         const artistText = [...new Set([t.artist, t.artist_name, t.albumArtist].filter(Boolean))].join(' · ')
         const albumNameText = t.albumName || t.album || ''
+        const coverSrc = t.coverUrl || ''
         npTitle.textContent = t.title || t.name || 'Unknown'
         npArtist.innerHTML = artistText ? `<a class="meta-link" onclick="event.stopPropagation();showArtistFromNowPlaying()">${escHtml(artistText)}</a>` : ''
         const nab = document.getElementById('np-album')
         if (nab) nab.innerHTML = albumNameText ? `<a class="meta-link" onclick="event.stopPropagation();showAlbumFromNowPlaying()">${escHtml(albumNameText)}</a>` : ''
-        npCover.src = t.coverUrl || ''
+        npCover.src = coverSrc
         npOverlayTitle.textContent = t.title || t.name || 'Unknown'
         const noaL = document.getElementById('np-overlay-artist-link')
         if (noaL) { noaL.textContent = artistText; noaL.onclick = () => showArtistFromNowPlaying() }
         const noabL = document.getElementById('np-overlay-album-link')
         if (noabL) { noabL.textContent = albumNameText; noabL.onclick = () => showAlbumFromNowPlaying() }
-        npOverlayCover.src = t.coverUrl || ''
+        npOverlayCover.src = coverSrc
         const displayDur = state.duration || state.trackDuration || 0
         if (npDuration) npDuration.textContent = player.formatTime(displayDur)
         if (npOverlayDuration) npOverlayDuration.textContent = player.formatTime(displayDur)
@@ -2524,16 +2622,20 @@
         if (state.duration && t.duration !== Math.round(state.duration)) {
           t.duration = Math.round(state.duration)
         }
+        // Background + color extraction
+        const bgImg = document.getElementById('np-overlay-bg-img')
+        if (bgImg) bgImg.src = coverSrc
+        _extractColors(coverSrc)
       }
     })
 
     player.on('play', () => {
-      playBtn.innerHTML = icons.pause
-      npOverlayPlay.innerHTML = icons.pause
+      playBtn.classList.add('is-playing')
+      npOverlayPlay.classList.add('is-playing')
     })
     player.on('pause', () => {
-      playBtn.innerHTML = icons.play
-      npOverlayPlay.innerHTML = icons.play
+      playBtn.classList.remove('is-playing')
+      npOverlayPlay.classList.remove('is-playing')
     })
     player.on('error', () => {
       const t = player.getState().currentTrack

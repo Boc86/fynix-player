@@ -109,6 +109,11 @@ class AudioService : android.app.Service() {
         if (MediaSessionHolder.session == null) {
             MediaSessionHolder.session = mediaSession
         }
+        mediaSession.setFlags(
+            MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+            MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS or
+            MediaSessionCompat.FLAG_HANDLES_QUEUE_COMMANDS
+        )
         mediaSession.setCallback(object : MediaSessionCompat.Callback() {
             override fun onPlay() { dispatchAction(ACTION_PLAY) }
             override fun onPause() { dispatchAction(ACTION_PAUSE) }
