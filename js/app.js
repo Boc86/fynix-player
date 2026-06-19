@@ -676,7 +676,7 @@
   }
 
   function getAppVersion() {
-    return window.AndroidBridge?.getVersion?.() || '1.0.0'
+    return window.AndroidBridge?.getVersion?.() || '1.1.0'
   }
 
   // --- Offline Cache ---
