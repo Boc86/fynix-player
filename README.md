@@ -7,7 +7,6 @@ A light-weight, self-contained Android music player that connects to [Navidrome]
   <img src="screenshots/sidebar.png" width="200" alt="Sidebar">
   <img src="screenshots/library.png" width="200" alt="Library">
   <img src="screenshots/search.png" width="200" alt="Search">
-  <img src="screenshots/settings.png" width="200" alt="Settings">
 </p>
 
 ## Features
@@ -29,7 +28,7 @@ A light-weight, self-contained Android music player that connects to [Navidrome]
 ### SoulSync Integration
 - **Wishlist management** — search SoulSync, add tracks/albums/artists to your wishlist
 - **Filter pills** — filter wishlist by status (pending, downloading, completed, error)
-- **One-tap wishlist** — add any Navidrome album to your SoulSync wishlist
+- **One-tap wishlist** — add any album to your SoulSync wishlist from yor soulsync connected services
 - **Download tracking** — monitor download progress and stats
 
 ### Setup & Onboarding
