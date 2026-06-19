@@ -543,8 +543,6 @@ html, body {
 }
 .ctrl-play .icon-wrap svg {
   position: absolute;
-  inset: 0;
-  margin: auto;
   transition: opacity .2s, transform .2s;
 }
 .ctrl-play .icon-play { opacity: 1; transform: scale(1); }
@@ -1938,6 +1936,11 @@ code {
   justify-content: center;
   color: #fff;
   transition: background .25s, transform .15s cubic-bezier(.4,0,.2,1);
+}
+
+.np-overlay-controls .ctrl-play .icon-wrap {
+  width: 44px;
+  height: 44px;
 }
 
 .np-overlay-controls .ctrl-play:hover {
