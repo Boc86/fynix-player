@@ -39,7 +39,324 @@
     heart: '<svg viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.31C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3z"/></svg>',
     heartFilled: '<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>',
     genre: '<svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>',
-    pip: '<svg viewBox="0 0 24 24"><path d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z"/></svg>'
+    pip: '<svg viewBox="0 0 24 24"><path d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z"/></svg>',
+    clock: '<svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>'
+  }
+
+  let _wizardStep = 0
+  let _tourStop = 0
+
+  const _wizardSteps = ['Welcome', 'Navidrome', 'SoulSync', 'Done']
+  const _tourStops = [
+    { view: 'home', selector: '#view-home', title: 'Home', text: 'Your dashboard — see recently played, new releases, and random picks from your library.' },
+    { view: 'search', selector: '#search-input', title: 'Search', text: 'Find any song, album, or artist in your library.' },
+    { view: 'albums', selector: '.library-tabs', title: 'Library', text: 'Browse your collection by Albums, Artists, or Tracks. Filter and sort as you like.' },
+    { view: 'playlists', selector: '#view-playlists .view-title', title: 'Playlists', text: 'Access all your Navidrome playlists in one place.' },
+    { view: 'home', selector: '#np-title', title: 'Now Playing', text: 'Tap the bottom bar to open full player controls, queue, EQ, and sleep timer.' },
+    { view: 'home', selector: '.top-bar-brand', title: 'Menu', text: 'Tap the Fynix logo to open the sidebar with full navigation to all sections.' },
+    { view: 'settings', selector: '.settings-tabs', title: 'Settings', text: 'Configure servers, audio (crossfade, gapless, EQ), and more.' }
+  ]
+
+  function startWizard() {
+    _wizardStep = 0
+    renderWizardOverlay()
+    renderWizardStep(0)
+  }
+
+  function renderWizardOverlay() {
+    let el = $('#wizard-overlay')
+    if (el) { el.classList.remove('hidden'); return }
+    el = document.createElement('div')
+    el.id = 'wizard-overlay'
+    el.className = 'wizard-overlay'
+    el.innerHTML = `
+      <div class="wizard-card">
+        <div class="wizard-header" id="wizard-dots"></div>
+        <div class="wizard-step active" id="wizard-body"></div>
+        <div class="wizard-footer">
+          <button class="wizard-btn wizard-btn-ghost" id="wizard-skip" onclick="wizardSkip()">Skip</button>
+          <div class="wizard-footer-right">
+            <button class="wizard-btn" id="wizard-back" onclick="wizardBack()" style="display:none">Back</button>
+            <button class="wizard-btn wizard-btn-primary" id="wizard-next" onclick="wizardNext()">Next</button>
+          </div>
+        </div>
+      </div>`
+    document.body.appendChild(el)
+  }
+
+  function renderWizardDots(active) {
+    const el = $('#wizard-dots')
+    if (!el) return
+    el.innerHTML = _wizardSteps.map((_, i) =>
+      `<span class="wizard-dot${i === active ? ' active' : ''}${i < active ? ' done' : ''}"></span>`
+    ).join('')
+  }
+
+  function renderWizardStep(idx) {
+    _wizardStep = idx
+    renderWizardDots(idx)
+    const body = $('#wizard-body')
+    const backBtn = $('#wizard-back')
+    const nextBtn = $('#wizard-next')
+    backBtn.style.display = idx === 0 ? 'none' : ''
+    switch (idx) {
+      case 0:
+        body.innerHTML = `
+          <img src="assets/logo.png" class="wizard-logo" alt="">
+          <h2>Welcome to Fynix</h2>
+          <p>Your personal music player. Connect your Navidrome and SoulSync servers to start listening, managing your wishlist, and more.</p>
+          <p style="margin-bottom:0">Let's get you set up in a few steps.</p>`
+        nextBtn.textContent = 'Get Started'
+        break
+      case 1:
+        body.innerHTML = `
+          <h2>Connect Navidrome</h2>
+          <p>Enter your Navidrome server details to access your music library.</p>
+          <div class="wizard-input-group">
+            <label>Server URL</label>
+            <input class="wizard-input" id="wiz-nav-server" placeholder="http://server:4533">
+          </div>
+          <div class="wizard-input-group">
+            <label>Username</label>
+            <input class="wizard-input" id="wiz-nav-user" placeholder="Username">
+          </div>
+          <div class="wizard-input-group">
+            <label>Password</label>
+            <input class="wizard-input" id="wiz-nav-pass" type="password" placeholder="password">
+          </div>
+          <div>
+            <button class="wizard-test-btn" id="wiz-nav-test">Test Connection</button>
+            <div class="wizard-test-msg" id="wiz-nav-msg"></div>
+          </div>`
+        nextBtn.textContent = 'Next'
+        $('#wiz-nav-test').onclick = wizardTestNavidrome
+        break
+      case 2:
+        body.innerHTML = `
+          <h2>Connect SoulSync</h2>
+          <p>SoulSync adds wishlist management and download tracking. Set up your server URL and API key.</p>
+          <div class="wizard-input-group">
+            <label>Server URL</label>
+            <input class="wizard-input" id="wiz-ss-server" placeholder="http://server:8008">
+          </div>
+          <div class="wizard-input-group">
+            <label>API Key</label>
+            <input class="wizard-input" id="wiz-ss-key" placeholder="sk_...">
+          </div>
+          <p style="font-size:.75rem;color:var(--text3);margin-top:-8px">Generate an API key from your SoulSync server's settings page.</p>
+          <div>
+            <button class="wizard-test-btn" id="wiz-ss-test">Test Connection</button>
+            <div class="wizard-test-msg" id="wiz-ss-msg"></div>
+          </div>`
+        nextBtn.textContent = 'Next'
+        $('#wiz-ss-test').onclick = wizardTestSoulSync
+        break
+      case 3:
+        body.innerHTML = `
+          <h2 style="text-align:center;margin-top:8px">You're all set!</h2>
+          <p style="text-align:center">Your servers are configured. Take a quick tour to learn the interface, or jump right in.</p>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px">
+            <button class="wizard-btn wizard-btn-primary" id="wiz-tour-btn" onclick="wizardFinish(true)" style="text-align:center">${icons.shuffle} Take a Tour</button>
+            <button class="wizard-btn" id="wiz-start-btn" onclick="wizardFinish(false)" style="text-align:center">${icons.play} Get Started</button>
+          </div>`
+        backBtn.style.display = 'none'
+        nextBtn.style.display = 'none'
+        $('#wizard-skip').style.display = 'none'
+        return
+    }
+    nextBtn.style.display = ''
+    $('#wizard-skip').style.display = ''
+  }
+
+  window.wizardNext = function () {
+    const s = settings.load()
+    if (_wizardStep === 1) {
+      s.navidrome_server = $('#wiz-nav-server')?.value || ''
+      s.navidrome_username = $('#wiz-nav-user')?.value || ''
+      s.navidrome_password = $('#wiz-nav-pass')?.value || ''
+      Object.assign(navidrome, { server: s.navidrome_server, username: s.navidrome_username, password: s.navidrome_password, proxyUrl: s.navidrome_proxy })
+      updateSidebarStatus()
+    }
+    if (_wizardStep === 2) {
+      s.soulsync_server = $('#wiz-ss-server')?.value || ''
+      s.soulsync_apikey = $('#wiz-ss-key')?.value || ''
+      Object.assign(soulsync, { server: s.soulsync_server, apiKey: s.soulsync_apikey, proxyUrl: s.soulsync_proxy })
+      updateSidebarStatus()
+    }
+    settings.save(s)
+    if (_wizardStep < 3) renderWizardStep(_wizardStep + 1)
+  }
+
+  window.wizardBack = function () {
+    if (_wizardStep > 0) renderWizardStep(_wizardStep - 1)
+  }
+
+  window.wizardSkip = function () {
+    settings.save({ _wizard_done: 'true' })
+    const overlay = $('#wizard-overlay')
+    if (overlay) overlay.classList.add('hidden')
+    if (!navidrome.configured) navigate('settings')
+    else navigate('home')
+  }
+
+  window.wizardFinish = function (tour) {
+    const s = settings.load()
+    s._wizard_done = 'true'
+    settings.save(s)
+    const overlay = $('#wizard-overlay')
+    if (overlay) overlay.classList.add('hidden')
+    if (tour) {
+      _tourStop = 0
+      startTour()
+    } else {
+      navigate('home')
+    }
+  }
+
+  async function wizardTestNavidrome() {
+    const btn = $('#wiz-nav-test')
+    const msg = $('#wiz-nav-msg')
+    btn.disabled = true
+    btn.textContent = 'Testing...'
+    msg.className = 'wizard-test-msg'
+    msg.textContent = ''
+    const controller = new AbortController()
+    const t = setTimeout(() => controller.abort(), 20000)
+    try {
+      const testNav = new NavidromeClient()
+      testNav.server = $('#wiz-nav-server')?.value || ''
+      testNav.username = $('#wiz-nav-user')?.value || ''
+      testNav.password = $('#wiz-nav-pass')?.value || ''
+      if (window.AndroidBridge) testNav.proxyUrl = 'http://localhost:8080'
+      const origRequest = testNav._request.bind(testNav)
+      const abortPromise = new Promise((_, reject) =>
+        controller.signal.addEventListener('abort', () => reject(new Error('Connection timed out')))
+      )
+      testNav._request = (endpoint, params) =>
+        Promise.race([origRequest(endpoint, params), abortPromise])
+      const resp = await testNav.ping()
+      msg.className = 'wizard-test-msg success'
+      msg.textContent = `Connected! v${resp.serverVersion}`
+    } catch (e) {
+      msg.className = 'wizard-test-msg error'
+      msg.textContent = e.message
+    } finally {
+      clearTimeout(t)
+      btn.disabled = false
+      btn.textContent = 'Test Connection'
+    }
+  }
+
+  async function wizardTestSoulSync() {
+    const btn = $('#wiz-ss-test')
+    const msg = $('#wiz-ss-msg')
+    btn.disabled = true
+    btn.textContent = 'Testing...'
+    msg.className = 'wizard-test-msg'
+    msg.textContent = ''
+    const controller = new AbortController()
+    const t = setTimeout(() => controller.abort(), 15000)
+    try {
+      const testSs = new SoulSyncClient()
+      testSs.server = $('#wiz-ss-server')?.value || ''
+      testSs.apiKey = $('#wiz-ss-key')?.value || ''
+      if (window.AndroidBridge) testSs.proxyUrl = 'http://localhost:8080'
+      await testSs.searchTracks('test', 1)
+      msg.className = 'wizard-test-msg success'
+      msg.textContent = 'Connected!'
+    } catch (e) {
+      msg.className = 'wizard-test-msg error'
+      msg.textContent = e.message
+    } finally {
+      clearTimeout(t)
+      btn.disabled = false
+      btn.textContent = 'Test Connection'
+    }
+  }
+
+  function startTour() {
+    let overlay = $('#tour-overlay')
+    if (!overlay) {
+      overlay = document.createElement('div')
+      overlay.id = 'tour-overlay'
+      overlay.className = 'tour-overlay'
+      overlay.innerHTML = '<div class="tour-highlight" id="tour-highlight"></div>'
+      document.body.appendChild(overlay)
+    }
+    overlay.style.display = ''
+    let tooltip = $('#tour-tooltip')
+    if (!tooltip) {
+      tooltip = document.createElement('div')
+      tooltip.className = 'tour-tooltip'
+      tooltip.id = 'tour-tooltip'
+      document.body.appendChild(tooltip)
+    }
+    tooltip.style.display = ''
+    showTourStop(0)
+  }
+
+  function showTourStop(idx) {
+    _tourStop = idx
+    const stop = _tourStops[idx]
+    if (!stop) return
+    navigate(stop.view)
+    setTimeout(() => {
+      const el = document.querySelector(stop.selector)
+      const highlight = $('#tour-highlight')
+      const tooltip = $('#tour-tooltip')
+      if (!tooltip) return
+      if (el) {
+        const rect = el.getBoundingClientRect()
+        highlight.style.display = 'block'
+        highlight.style.left = (rect.left - 6) + 'px'
+        highlight.style.top = (rect.top - 6) + 'px'
+        highlight.style.width = (rect.width + 12) + 'px'
+        highlight.style.height = (rect.height + 12) + 'px'
+      } else {
+        highlight.style.display = 'none'
+      }
+      if (document.activeElement?.blur) document.activeElement.blur()
+      tooltip.innerHTML = `
+        <h4>${stop.title}</h4>
+        <p>${stop.text}</p>
+        <div class="tour-tooltip-nav">
+          <span style="font-size:.7rem;color:var(--text3)">${idx + 1} / ${_tourStops.length}</span>
+          <div style="display:flex;gap:6px">
+            ${idx > 0 ? '<button class="wizard-btn wizard-btn-ghost" id="tour-prev">Prev</button>' : ''}
+            ${idx < _tourStops.length - 1
+              ? '<button class="wizard-btn wizard-btn-primary" id="tour-next">Next</button>'
+              : '<button class="wizard-btn wizard-btn-primary" id="tour-finish">Finish Tour</button>'}
+          </div>
+        </div>`
+      tooltip.style.display = 'block'
+      $('#tour-prev')?.addEventListener('click', tourPrev)
+      $('#tour-next')?.addEventListener('click', tourNext)
+      $('#tour-finish')?.addEventListener('click', tourFinish)
+    }, 100)
+  }
+
+  function tourNext() {
+    if (_tourStop < _tourStops.length - 1) showTourStop(_tourStop + 1)
+  }
+
+  function tourPrev() {
+    if (_tourStop > 0) showTourStop(_tourStop - 1)
+  }
+
+  function tourFinish() {
+    const highlight = $('#tour-highlight')
+    const tooltip = $('#tour-tooltip')
+    const overlay = $('#tour-overlay')
+    if (highlight) highlight.style.display = 'none'
+    if (tooltip) tooltip.style.display = 'none'
+    if (overlay) overlay.style.display = 'none'
+    navigate('home')
+  }
+
+  window.restartWizard = function () {
+    settings.save({ _wizard_done: 'false' })
+    startWizard()
   }
 
   function init() {
@@ -51,6 +368,12 @@
       bindSearch()
       bindKeyboard()
       applySavedSettings()
+      const s = settings.load()
+      if (s._wizard_done !== 'true' && s._wizard_done !== true) {
+        navigate('home')
+        startWizard()
+        return
+      }
       if (!navidrome.configured) {
         navigate('settings')
       } else {
@@ -147,10 +470,16 @@
     if (s.crossfade) player.setCrossfade(parseFloat(s.crossfade) || 0)
     player.setGapless(s.gapless !== false)
     if (s.eqEnabled && s.equalizer) player.setEq(s.equalizer)
-    // On Android, default SoulSync proxy to local server (for CORS)
-    if (window.AndroidBridge && !s.soulsync_proxy) {
-      s.soulsync_proxy = 'http://localhost:8080'
-      settings.save({ soulsync_proxy: 'http://localhost:8080' })
+    // On Android, default to embedded proxy (CORS bypass)
+    if (window.AndroidBridge) {
+      if (!s.soulsync_proxy) {
+        s.soulsync_proxy = 'http://localhost:8080'
+        settings.save({ soulsync_proxy: 'http://localhost:8080' })
+      }
+      if (!s.navidrome_proxy) {
+        s.navidrome_proxy = 'http://localhost:8080'
+        settings.save({ navidrome_proxy: 'http://localhost:8080' })
+      }
     }
     if (s.navidrome_server) {
       Object.assign(navidrome, {
@@ -175,19 +504,15 @@
     app.innerHTML = `
       <header class="top-bar" id="top-bar">
         <div class="top-bar-left">
-          <button class="icon-btn" id="menu-btn" aria-label="Menu" onclick="document.getElementById('sidebar')?.classList.toggle('open');document.getElementById('sidebar-backdrop')?.classList.toggle('show')">${icons.menu}</button>
-          <div class="top-bar-brand">
+          <div class="top-bar-brand" onclick="document.getElementById('sidebar')?.classList.toggle('open');document.getElementById('sidebar-backdrop')?.classList.toggle('show')">
             <img src="assets/logo.png" class="top-bar-logo" alt="Fynix">
-            <span class="top-bar-title">Fynix</span>
           </div>
         </div>
         <span class="top-bar-center" id="top-bar-title">Home</span>
-        <div class="top-bar-right">
-          <button class="icon-btn" onclick="navigate('settings')" aria-label="Settings">${icons.settings}</button>
-        </div>
+        <div class="top-bar-right"></div>
       </header>
 
-      <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+      <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="this.classList.remove('show');document.getElementById('sidebar')?.classList.remove('open')"></div>
 
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
@@ -271,11 +596,19 @@
         <div class="np-overlay-bg" id="np-overlay-bg"><img id="np-overlay-bg-img" alt=""></div>
         <div class="np-overlay-header">
           <button class="icon-btn" id="np-back-btn" aria-label="Close">${icons.back}</button>
-          <span class="np-overlay-title-text">Now Playing</span>
+          <span class="np-overlay-title-text" id="np-queue-pos">Now Playing</span>
           <div style="display:flex;gap:4px">
+            <button class="icon-btn sleep-btn" id="np-sleep-btn" aria-label="Sleep Timer">${icons.clock}</button>
             <button class="icon-btn" id="np-pip-btn" aria-label="Picture in Picture" style="display:none">${icons.pip}</button>
             <button class="icon-btn" id="np-queue-btn" aria-label="Queue">${icons.queue}</button>
           </div>
+        </div>
+        <div class="sleep-popup" id="np-sleep-popup" style="display:none">
+          <div class="sleep-popup-item" data-duration="15">15 minutes</div>
+          <div class="sleep-popup-item" data-duration="30">30 minutes</div>
+          <div class="sleep-popup-item" data-duration="60">1 hour</div>
+          <div class="sleep-popup-item" data-duration="track">End of track</div>
+          <div class="sleep-popup-item sleep-popup-off" data-duration="off">Off</div>
         </div>
         <div class="np-overlay-body">
           <div class="np-overlay-artwork">
@@ -320,10 +653,17 @@
   function updateSidebarStatus() {
     const el = $('#sidebar-status')
     if (!el) return
-    const parts = []
-    parts.push(navidrome.configured ? '\u2705 Navidrome' : '\u274C Navidrome')
-    parts.push(soulsync.configured ? '\u2705 SoulSync' : '\u274C SoulSync')
-    el.textContent = parts.join(' | ')
+    const status = []
+    status.push(navidrome.configured ? '\u2705 Navidrome' : '\u274C Navidrome')
+    status.push(soulsync.configured ? '\u2705 SoulSync' : '\u274C SoulSync')
+    const verHtml = window.AndroidBridge
+      ? '<span style="color:inherit;text-decoration:none;cursor:pointer" onclick="AndroidBridge.openUrl(\'https://github.com/Boc86/fynix-player\')">v' + getAppVersion() + '</span>'
+      : '<a href="https://github.com/Boc86/fynix-player" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">v' + getAppVersion() + '</a>'
+    el.innerHTML = '<span>' + status.join(' | ') + '</span><span>' + verHtml + '</span>'
+  }
+
+  function getAppVersion() {
+    return window.AndroidBridge?.getVersion?.() || '1.0.0'
   }
 
   function bindNavigation() {
@@ -398,6 +738,35 @@
     setTimeout(() => el.classList.add('hidden'), 300)
   }
 
+  window.goBack = function () {
+    const np = $('#now-playing-screen')
+    if (np && !np.classList.contains('hidden') && np.classList.contains('open')) {
+      hideNowPlaying()
+      return
+    }
+    const sidebar = $('#sidebar')
+    if (sidebar?.classList.contains('open')) {
+      sidebar.classList.remove('open')
+      $('#sidebar-backdrop')?.classList.remove('show')
+      return
+    }
+    const tour = $('#tour-overlay')
+    if (tour && tour.style.display !== 'none') {
+      $('#tour-highlight')?.style ? ($('#tour-highlight').style.display = 'none') : null
+      $('#tour-tooltip')?.style ? ($('#tour-tooltip').style.display = 'none') : null
+      tour.style.display = 'none'
+      navigate('home')
+      return
+    }
+    const wizard = $('#wizard-overlay')
+    if (wizard && !wizard.classList.contains('hidden')) {
+      wizard.classList.add('hidden')
+      return
+    }
+    const prev = previousView || 'home'
+    navigate(prev === currentView ? 'home' : prev)
+  }
+
   function updateNowPlaying() {
     const state = player.getState()
     const t = state.currentTrack
@@ -456,6 +825,13 @@
       } else {
         overlayStar.style.display = 'none'
       }
+    }
+
+    // Queue position
+    const qp = $('#np-queue-pos')
+    if (qp) {
+      const total = state.queue.length
+      qp.textContent = total > 0 ? `${state.currentIndex + 1} / ${total}` : 'Now Playing'
     }
   }
 
@@ -548,14 +924,14 @@
     el.innerHTML = '<div class="loading"><div class="loading-spinner"></div> Loading...</div>'
     try {
       const resp = await navidrome.getGenres()
-      const genres = resp?.subsonicResponse?.genres?.genre || []
+      const genres = resp?.genres?.genre || []
       _allGenres = genres
       if (!genres.length) { el.innerHTML = '<div class="empty-state">No genres available</div>'; return }
       el.innerHTML = `
         <h3 class="section-title">Genres</h3>
         <div class="genre-grid">${genres.map(g => `
-          <div class="genre-chip" onclick="showGenreTracks('${escHtml(g.name || '').replace(/'/g, "\\'")}')">
-            <span class="genre-name">${escHtml(g.name || 'Unknown')}</span>
+          <div class="genre-chip" onclick="showGenreTracks('${escHtml(g.value || g.name || '').replace(/'/g, "\\'")}')">
+            <span class="genre-name">${escHtml(g.value || g.name || 'Unknown')}</span>
             <span class="genre-count">${g.songCount || 0} songs</span>
           </div>
         `).join('')}</div>
@@ -571,7 +947,7 @@
     el.innerHTML = `<div class="loading"><div class="loading-spinner"></div> Loading...</div>`
     try {
       const resp = await navidrome.getSongsByGenre(genre, 200)
-      const songs = resp?.subsonicResponse?.randomSongs?.song || []
+      const songs = resp?.songsByGenre?.song || []
       if (!songs.length) { el.innerHTML = '<div class="empty-state">No songs found in this genre</div>'; return }
       const tracks = songs.map(s => ({
         ...s, streamUrl: navidrome.streamUrl(s.id),
@@ -582,7 +958,11 @@
       el.innerHTML = `
         <div class="library-header">
           <h3 class="section-title">${escHtml(genre)}</h3>
-          <button class="btn btn-sm" onclick="navigate('genres')">${icons.back} Back</button>
+          <div class="library-actions">
+            <button class="btn btn-primary btn-sm" onclick="playAll()">${icons.play} Play All</button>
+            <button class="btn btn-secondary btn-sm" onclick="shufflePlay()">${icons.shuffle} Shuffle</button>
+            <button class="btn btn-sm" onclick="navigate('genres')">${icons.back} Back</button>
+          </div>
         </div>
         <div class="track-list">${tracks.map((t, i) => `
           <div class="track-row" onclick="playLibraryTrack(${i})"${_ctxAttr(t)}>
@@ -1303,8 +1683,16 @@
   }
 
   window.playAll = function () {
-    const songs = window._currentAlbumSongs || []
+    const songs = window._currentAlbumSongs?.length ? window._currentAlbumSongs : (window._libraryTracks || [])
     if (songs.length) player.playQueue(songs, 0)
+  }
+
+  window.shufflePlay = function () {
+    const songs = window._currentAlbumSongs?.length ? window._currentAlbumSongs : (window._libraryTracks || [])
+    if (songs.length) {
+      const idx = Math.floor(Math.random() * songs.length)
+      player.playQueue(songs, idx)
+    }
   }
 
   window.playMediaId = async function (songId, parentType, parentId) {
@@ -1658,6 +2046,8 @@
       if (e.target.closest('#settings-save')) saveSettings()
       if (e.target.closest('#settings-test-navidrome')) testNavidrome()
       if (e.target.closest('#settings-test-soulsync')) testSoulSync()
+      if (e.target.closest('#settings-rescan-btn')) rescanLibrary()
+      if (e.target.closest('#settings-wizard-btn')) restartWizard()
     })
   }
 
@@ -1700,6 +2090,7 @@
               <label>Username <input type="text" class="input" id="s-nav-user" value="${escHtml(s.navidrome_username)}"></label>
               <label>Password <input type="password" class="input" id="s-nav-pass" value="${escHtml(s.navidrome_password)}"></label>
               <button type="button" class="btn btn-secondary" id="settings-test-navidrome" style="margin-top:8px">Test Connection</button>
+              <button type="button" class="btn btn-secondary" id="settings-rescan-btn" style="margin-top:6px">${icons.refresh} Rescan Library</button>
             </section>
             <section class="settings-section">
               <h3>SoulSync</h3>
@@ -1707,6 +2098,11 @@
               <label>Server URL <input type="url" class="input" id="s-ss-server" value="${escHtml(s.soulsync_server)}" placeholder="https://soulsync.example.com"></label>
               <label>API Key <input type="password" class="input" id="s-ss-key" value="${escHtml(s.soulsync_apikey)}" placeholder="sk_..."></label>
               <button type="button" class="btn btn-secondary" id="settings-test-soulsync" style="margin-top:8px">Test Connection</button>
+            </section>
+            <section class="settings-section">
+              <h3>Setup</h3>
+              <p class="settings-desc">Re-run the setup wizard</p>
+              <button type="button" class="btn btn-secondary" id="settings-wizard-btn" style="margin-top:8px">Show Setup Wizard</button>
             </section>
             <button type="button" class="btn btn-primary" id="settings-save">Save Settings</button>
           </form>
@@ -1885,6 +2281,7 @@
       testNav.server = $('#s-nav-server')?.value || ''
       testNav.username = $('#s-nav-user')?.value || ''
       testNav.password = $('#s-nav-pass')?.value || ''
+      if (window.AndroidBridge) testNav.proxyUrl = 'http://localhost:8080'
       const resp = await testNav.ping()
       showSuccess(`Navidrome connected! v${resp.serverVersion}`)
     } catch (e) {
@@ -1911,6 +2308,21 @@
     } finally {
       btn.disabled = false
       btn.textContent = 'Test Connection'
+    }
+  }
+
+  async function rescanLibrary() {
+    const btn = $('#settings-rescan-btn')
+    btn.disabled = true
+    btn.textContent = 'Scanning...'
+    try {
+      await navidrome.startScan()
+      showSuccess('Library scan started')
+    } catch (e) {
+      showError(`Rescan failed: ${e.message}`)
+    } finally {
+      btn.disabled = false
+      btn.innerHTML = `${icons.refresh} Rescan Library`
     }
   }
 
@@ -3010,7 +3422,61 @@
       const albums = stats.albums || 0
       const isProcessing = stats.is_auto_processing || false
 
-      let html = `
+      const counts = { pending: 0, missing: 0, failed: 0 }
+      tracks.forEach(t => {
+        if (t.retry_count > 0) counts.failed++
+        else if (t.failure_reason) counts.missing++
+        else counts.pending++
+      })
+
+      function renderTrackList(filter) {
+        filter = filter || 'all'
+        const items = filter === 'all' ? tracks : tracks.filter(t => {
+          if (filter === 'pending') return !t.retry_count && !t.failure_reason
+          if (filter === 'missing') return !t.retry_count && !!t.failure_reason
+          if (filter === 'failed') return t.retry_count > 0
+          return true
+        })
+
+        const listEl = $('#wishlist-track-list')
+        if (!listEl) return
+
+        if (!items.length) {
+          listEl.innerHTML = `<div class="empty-state" style="padding:20px">No ${filter === 'all' ? '' : filter} tracks</div>`
+          return
+        }
+
+        listEl.innerHTML = items.map(t => {
+          const trackId = t.track_id || t.spotify_track_id || ''
+          const isFailed = t.retry_count > 0
+          const isMissing = !isFailed && t.failure_reason
+          const addedDate = t.date_added ? new Date(t.date_added).toLocaleDateString() : ''
+          return `
+            <div class="track-row wishlist-track">
+              <div class="track-info">
+                <div class="track-name">${escHtml(t.track_name || 'Unknown')}</div>
+                <div class="track-artist">
+                  ${escHtml(t.artist_name || '')}
+                  ${t.album_name ? `· <span class="wishlist-album">${escHtml(t.album_name)}</span>` : ''}
+                </div>
+                <div class="wishlist-track-meta">
+                  <span class="wishlist-date">${addedDate}</span>
+                  ${t.source_type ? `<span>${escHtml(t.source_type)}</span>` : ''}
+                  ${isFailed ? `<span class="wishlist-failed" title="${escHtml(t.failure_reason || `Retries: ${t.retry_count}`)}">⚠ failed</span>` : ''}
+                  ${isMissing ? `<span class="wishlist-missing" title="${escHtml(t.failure_reason)}">not in library</span>` : ''}
+                </div>
+              </div>
+              <span class="wishlist-source-type">${escHtml(t.source_type || '')}</span>
+              <button class="icon-btn" onclick="removeWishlistTrackInSettings('${escHtml(trackId)}', this)" title="Remove">${icons.close}</button>
+            </div>`
+        }).join('')
+
+        $$('.wishlist-filter').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.filter === filter)
+        })
+      }
+
+      el.innerHTML = `
         <div class="wishlist-actions" style="margin-bottom:10px">
           <button class="btn btn-primary btn-sm" id="sw-download-btn" ${isProcessing ? 'disabled' : ''}>
             ${isProcessing ? 'Processing...' : `${icons.download} Download All`}
@@ -3018,38 +3484,21 @@
           <button class="btn btn-danger btn-sm" id="sw-clear-btn">${icons.delete} Clear</button>
         </div>
         <div class="wishlist-stats">
-          <span class="wishlist-stat">${total} total</span>
+          <span class="wishlist-stat wishlist-filter" data-filter="all">${total} total</span>
+          ${counts.pending > 0 ? `<span class="wishlist-stat wishlist-filter" data-filter="pending">${counts.pending} pending</span>` : ''}
+          ${counts.missing > 0 ? `<span class="wishlist-stat wishlist-filter" data-filter="missing">${counts.missing} missing</span>` : ''}
+          ${counts.failed > 0 ? `<span class="wishlist-stat wishlist-filter" data-filter="failed">${counts.failed} failed</span>` : ''}
           ${singles ? `<span class="wishlist-stat">${singles} singles</span>` : ''}
           ${albums ? `<span class="wishlist-stat">${albums} albums</span>` : ''}
         </div>
-        <div class="track-list">
-      `
+        <div class="track-list" id="wishlist-track-list">
+      </div>`
 
-      tracks.forEach(t => {
-        const trackId = t.track_id || t.spotify_track_id || ''
-        const hasFailed = t.retry_count > 0 || t.failure_reason
-        const addedDate = t.date_added ? new Date(t.date_added).toLocaleDateString() : ''
-        html += `
-          <div class="track-row wishlist-track">
-            <div class="track-info">
-              <div class="track-name">${escHtml(t.track_name || 'Unknown')}</div>
-              <div class="track-artist">
-                ${escHtml(t.artist_name || '')}
-                ${t.album_name ? `· <span class="wishlist-album">${escHtml(t.album_name)}</span>` : ''}
-              </div>
-              <div class="wishlist-track-meta">
-                <span class="wishlist-date">${addedDate}</span>
-                ${t.source_type ? `<span>${escHtml(t.source_type)}</span>` : ''}
-                ${hasFailed ? `<span class="wishlist-failed" title="${escHtml(t.failure_reason || `Retries: ${t.retry_count}`)}">⚠ failed</span>` : ''}
-              </div>
-            </div>
-            <span class="wishlist-source-type">${escHtml(t.source_type || '')}</span>
-            <button class="icon-btn" onclick="removeWishlistTrackInSettings('${escHtml(trackId)}', this)" title="Remove">${icons.close}</button>
-          </div>`
+      renderTrackList('all')
+
+      $$('.wishlist-filter').forEach(btn => {
+        btn.addEventListener('click', () => renderTrackList(btn.dataset.filter))
       })
-
-      html += '</div>'
-      el.innerHTML = html
 
       $('#sw-download-btn')?.addEventListener('click', async () => {
         const btn = $('#sw-download-btn')
@@ -3397,6 +3846,134 @@
       const msg = t ? `Failed to play: ${t.title || 'unknown'}` : 'Playback failed'
       showError(msg)
     })
+
+    // Sleep timer
+    let _sleepTimeout = null
+    let _sleepInterval = null
+    let _sleepMode = null // 'duration' | 'track' | null
+
+    function _restoreSleepTimer() {
+      try {
+        const raw = localStorage.getItem('fynix_sleep_timer')
+        if (!raw) return
+        const data = JSON.parse(raw)
+        if (data.mode === 'track') {
+          _sleepMode = 'track'
+          _updateSleepDisplay()
+          return
+        }
+        const remaining = data.endTime - Date.now()
+        if (remaining <= 0) return
+        _sleepMode = 'duration'
+        setTimeout(() => _sleepExpired(), remaining)
+        _sleepInterval = setInterval(_updateSleepDisplay, 1000)
+        _updateSleepDisplay()
+      } catch (_) {}
+    }
+
+    function _sleepExpired() {
+      player.pause()
+      _clearSleepTimer()
+      showSuccess('Sleep timer ended')
+    }
+
+    function _clearSleepTimer() {
+      if (_sleepTimeout) clearTimeout(_sleepTimeout)
+      if (_sleepInterval) clearInterval(_sleepInterval)
+      _sleepTimeout = null
+      _sleepInterval = null
+      _sleepMode = null
+      localStorage.removeItem('fynix_sleep_timer')
+      const btn = $('#np-sleep-btn')
+      if (btn) btn.innerHTML = icons.clock
+    }
+
+    function _updateSleepDisplay() {
+      const btn = $('#np-sleep-btn')
+      if (!btn) return
+      if (!_sleepMode) {
+        btn.innerHTML = icons.clock
+        btn.classList.remove('active')
+        return
+      }
+      btn.classList.add('active')
+      if (_sleepMode === 'track') {
+        btn.innerHTML = `${icons.clock} track`
+        return
+      }
+      try {
+        const raw = localStorage.getItem('fynix_sleep_timer')
+        if (!raw) return
+        const data = JSON.parse(raw)
+        const remaining = Math.max(0, data.endTime - Date.now())
+        if (remaining <= 0) { _sleepExpired(); return }
+        const mins = Math.floor(remaining / 60000)
+        const secs = Math.floor((remaining % 60000) / 1000)
+        btn.innerHTML = `${icons.clock} ${mins}:${String(secs).padStart(2, '0')}`
+      } catch (_) {}
+    }
+
+    const sleepBtn = $('#np-sleep-btn')
+    const sleepPopup = $('#np-sleep-popup')
+
+    sleepBtn?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (!sleepPopup) return
+      const shown = sleepPopup.style.display !== 'none'
+      sleepPopup.style.display = shown ? 'none' : ''
+    })
+
+    sleepPopup?.addEventListener('click', (e) => {
+      const item = e.target.closest('.sleep-popup-item')
+      if (!item) return
+      const duration = item.dataset.duration
+
+      _clearSleepTimer()
+
+      if (duration === 'off') {
+        sleepPopup.style.display = 'none'
+        _updateSleepDisplay()
+        return
+      }
+
+      if (duration === 'track') {
+        _sleepMode = 'track'
+        localStorage.setItem('fynix_sleep_timer', JSON.stringify({ mode: 'track' }))
+        _updateSleepDisplay()
+        sleepPopup.style.display = 'none'
+        return
+      }
+
+      const mins = parseInt(duration)
+      if (isNaN(mins)) return
+      _sleepMode = 'duration'
+      const endTime = Date.now() + mins * 60000
+      localStorage.setItem('fynix_sleep_timer', JSON.stringify({ endTime, mode: 'duration', mins }))
+      _sleepTimeout = setTimeout(() => _sleepExpired(), mins * 60000)
+      _sleepInterval = setInterval(_updateSleepDisplay, 1000)
+      _updateSleepDisplay()
+      sleepPopup.style.display = 'none'
+    })
+
+    // Close popup on click outside
+    document.addEventListener('click', (e) => {
+      if (sleepPopup && sleepPopup.style.display !== 'none' && !e.target.closest('.sleep-btn') && !e.target.closest('.sleep-popup')) {
+        sleepPopup.style.display = 'none'
+      }
+    })
+
+    // End-of-track detection
+    player.audio.addEventListener('ended', () => {
+      if (_sleepMode === 'track') {
+        setTimeout(() => {
+          player.pause()
+          _clearSleepTimer()
+          showSuccess('Sleep timer ended')
+        }, 50)
+      }
+    })
+
+    _restoreSleepTimer()
   }
 
   function bindKeyboard() {

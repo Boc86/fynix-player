@@ -17,6 +17,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.WebSettings
 import android.util.Log
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -56,6 +57,14 @@ class MainActivity : AppCompatActivity() {
         requestNotificationPermission()
         startLocalServer()
         setupWebView()
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                webView.evaluateJavascript(
+                    "if (typeof window.goBack === 'function') { window.goBack(); 'handled' } else { 'noop' }",
+                    null
+                )
+            }
+        })
         queuePendingFromIntent(intent)
     }
 
@@ -274,6 +283,12 @@ class MainActivity : AppCompatActivity() {
                             .build()
                         enterPictureInPictureMode(params)
                     }
+                }
+
+                @JavascriptInterface
+                fun openUrl(url: String) {
+                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                    startActivity(intent)
                 }
             } as Any, "AndroidBridge")
 

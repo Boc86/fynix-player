@@ -7,14 +7,33 @@ class SettingsManager {
       navidrome_proxy: '',
       soulsync_server: '',
       soulsync_apikey: '',
-      soulsync_proxy: ''
+      soulsync_proxy: '',
+      crossfade: '0',
+      gapless: 'true',
+      eqEnabled: 'false',
+      equalizer: '',
+      eqPreset: 'custom',
+      _settingsTab: 'servers',
+      _wizard_done: 'false'
     }
+    this._jsonKeys = ['equalizer']
   }
 
   load() {
     const settings = {}
     for (const [key, def] of Object.entries(this.defaults)) {
-      settings[key] = localStorage.getItem(key) ?? def
+      const raw = localStorage.getItem(key)
+      if (raw === null) {
+        settings[key] = def
+      } else if (this._jsonKeys.includes(key)) {
+        try { settings[key] = JSON.parse(raw) } catch (_) { settings[key] = def }
+      } else if (raw === 'true') {
+        settings[key] = true
+      } else if (raw === 'false') {
+        settings[key] = false
+      } else {
+        settings[key] = raw
+      }
     }
     return settings
   }
@@ -22,13 +41,14 @@ class SettingsManager {
   save(settings) {
     for (const [key, value] of Object.entries(settings)) {
       if (key in this.defaults) {
-        localStorage.setItem(key, value)
+        const stored = this._jsonKeys.includes(key) ? JSON.stringify(value) : String(value)
+        localStorage.setItem(key, stored)
       }
     }
   }
 
   get(key) {
-    return localStorage.getItem(key) ?? this.defaults[key]
+    return this.load()[key]
   }
 
   clear() {

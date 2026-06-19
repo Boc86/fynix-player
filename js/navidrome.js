@@ -185,6 +185,10 @@ class NavidromeClient {
     return this._request('getSongsByGenre', { genre, count: String(count), offset: String(offset) })
   }
 
+  async startScan() {
+    return this._request('startScan')
+  }
+
   async getMusicFolders() {
     return this._request('getMusicFolders')
   }
