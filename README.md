@@ -3,10 +3,8 @@
 A light-weight, self-contained Android music player that connects to [Navidrome](https://www.navidrome.org/) and [SoulSync](https://github.com/Nezreka/SoulSync) for browsing, streaming, and managing your music library. Built as a WebView wrapper with an embedded HTTP server — no external dependencies on the phone.
 
 <p>
-  <img src="screenshots/home.png" width="200" alt="Home">
-  <img src="screenshots/sidebar.png" width="200" alt="Sidebar">
-  <img src="screenshots/library.png" width="200" alt="Library">
-  <img src="screenshots/search.png" width="200" alt="Search">
+  <img src="screenshots/sidebar.png" width="200" alt="Home">
+  <img src="screenshots/home.png" width="200" alt="Sidebar">
 </p>
 
 ## Features
@@ -53,11 +51,8 @@ A light-weight, self-contained Android music player that connects to [Navidrome]
 
 | Screen | Description |
 |--------|-------------|
-| ![Home](screenshots/home.png) | Dashboard with recently played, new releases, and random picks |
-| ![Sidebar](screenshots/sidebar.png) | Full navigation sidebar with server status and version |
-| ![Library](screenshots/library.png) | Browse albums, artists, and tracks with sort and filter |
-| ![Search](screenshots/search.png) | Search across Navidrome library and SoulSync |
-| ![Settings](screenshots/settings.png) | Server configuration, audio settings, and app preferences |
+| ![Home](screenshots/sidebar.png) | Dashboard with recently played, new releases, and random picks |
+| ![Sidebar](screenshots/home.png) | Full navigation sidebar with server status and version |
 
 ## Download
 
