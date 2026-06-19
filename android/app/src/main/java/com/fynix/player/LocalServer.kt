@@ -3,6 +3,7 @@ package com.fynix.player
 import android.content.res.AssetManager
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -18,7 +19,8 @@ fun InputStream.readFully(buf: ByteArray) {
 
 class LocalServer(
     private val assets: AssetManager,
-    private val port: Int = 8080
+    private val port: Int = 8080,
+    private val cacheDir: File? = null
 ) : NanoHTTPD(port) {
 
     override fun serve(session: IHTTPSession): Response {
@@ -135,6 +137,7 @@ class LocalServer(
             val server = session.parameters["server"]?.firstOrNull() ?: ""
             val u = session.parameters["u"]?.firstOrNull() ?: ""
             val p = session.parameters["p"]?.firstOrNull() ?: ""
+            val fmt = session.parameters["format"]?.firstOrNull() ?: ""
             if (id.isNotBlank() && server.isNotBlank()) {
                 val endpoint = if (uri.startsWith("/api/navidrome-stream")) "stream.view" else "getCoverArt.view"
                 val encId = java.net.URLEncoder.encode(id, "UTF-8")
@@ -144,7 +147,8 @@ class LocalServer(
                     val size = session.parameters["size"]?.firstOrNull() ?: "300"
                     "id=$encId&size=$size&u=$encU&p=$encP&v=1.12.0&c=fynix-android"
                 } else {
-                    "id=$encId&u=$encU&p=$encP&v=1.12.0&c=fynix-android"
+                    val fmtParam = if (fmt.isNotBlank()) "&format=$fmt" else ""
+                    "id=$encId&u=$encU&p=$encP&v=1.12.0&c=fynix-android$fmtParam"
                 }
                 val target = "${server.trimEnd('/')}/rest/$endpoint?$qs"
                 val url = URL(target)
@@ -167,6 +171,41 @@ class LocalServer(
                 resp.addHeader("Access-Control-Allow-Origin", "*")
                 return resp
             }
+        }
+
+        // Serve cached audio files
+        if (uri.startsWith("/api/cached/") && cacheDir != null) {
+            val trackId = uri.removePrefix("/api/cached/")
+            val safeId = trackId.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            val file = File(File(cacheDir, "audio"), "${safeId}.mp3")
+            if (file.exists()) {
+                val rangeHeader = session.headers?.get("range")
+                val fileLen = file.length()
+                if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                    val parts = rangeHeader.removePrefix("bytes=").split("-")
+                    val start = parts.firstOrNull()?.toLongOrNull() ?: 0
+                    val end = parts.getOrNull(1)?.toLongOrNull() ?: (fileLen - 1)
+                    val len = (end - start + 1).toInt()
+                    val fis = java.io.FileInputStream(file)
+                    fis.skip(start)
+                    val data = ByteArray(len)
+                    var offset = 0
+                    while (offset < len) {
+                        val read = fis.read(data, offset, len - offset)
+                        if (read == -1) break
+                        offset += read
+                    }
+                    fis.close()
+                    val resp = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, "audio/mpeg", data.inputStream(), len.toLong())
+                    resp.addHeader("Content-Range", "bytes $start-$end/$fileLen")
+                    resp.addHeader("Accept-Ranges", "bytes")
+                    return resp
+                }
+                val resp = newFixedLengthResponse(Response.Status.OK, "audio/mpeg", file.inputStream(), fileLen)
+                resp.addHeader("Accept-Ranges", "bytes")
+                return resp
+            }
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not cached")
         }
 
         val filePath = if (uri == "/" || uri.isBlank()) "web/index.html" else "web$uri"

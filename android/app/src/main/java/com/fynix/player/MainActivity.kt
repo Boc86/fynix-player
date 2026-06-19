@@ -35,6 +35,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var localServer: LocalServer
+    private lateinit var cacheManager: CacheManager
     private var pageLoaded = false
     private var pendingMediaId: String? = null
     private var pendingParentType = ""
@@ -55,6 +56,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         requestNotificationPermission()
+        cacheManager = CacheManager(this)
         startLocalServer()
         setupWebView()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -139,7 +141,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startLocalServer() {
-        localServer = LocalServer(assets, 8080)
+        localServer = LocalServer(assets, 8080, cacheDir = cacheDir)
         try {
             localServer.start()
         } catch (e: Exception) {
@@ -290,6 +292,74 @@ class MainActivity : AppCompatActivity() {
                     val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
                     startActivity(intent)
                 }
+
+                @JavascriptInterface
+                fun cacheTrack(trackId: String, streamUrl: String, title: String, artist: String, album: String, duration: Int) {
+                    cacheManager.cacheTrack(trackId, streamUrl, title, artist, album, duration)
+                }
+
+                @JavascriptInterface
+                fun isCached(trackId: String): Boolean {
+                    return cacheManager.hasCached(trackId)
+                }
+
+                @JavascriptInterface
+                fun getCachedUrl(trackId: String): String {
+                    val path = cacheManager.getCachedPath(trackId)
+                    return if (path != null) "http://localhost:8080/api/cached/$trackId" else ""
+                }
+
+                @JavascriptInterface
+                fun getCachedTracks(): String {
+                    val entries = cacheManager.getAllTracks()
+                    val arr = org.json.JSONArray()
+                    entries.forEach { entry ->
+                        arr.put(org.json.JSONObject().apply {
+                            put("trackId", entry.trackId)
+                            put("title", entry.title)
+                            put("artist", entry.artist)
+                            put("album", entry.album)
+                            put("cachedAt", entry.cachedAt)
+                            put("fileSize", entry.fileSize)
+                            put("duration", entry.duration)
+                        })
+                    }
+                    return arr.toString()
+                }
+
+                @JavascriptInterface
+                fun deleteCachedTrack(trackId: String) {
+                    cacheManager.deleteTrack(trackId)
+                }
+
+                @JavascriptInterface
+                fun getCacheStats(): String {
+                    val (size, count) = cacheManager.getCacheStats()
+                    return org.json.JSONObject().apply {
+                        put("sizeBytes", size)
+                        put("count", count)
+                    }.toString()
+                }
+
+                @JavascriptInterface
+                fun clearCache() {
+                    cacheManager.clearAll()
+                }
+
+                @JavascriptInterface
+                fun setCacheMaxSize(sizeBytes: Long) {
+                    cacheManager.setMaxSize(sizeBytes)
+                }
+
+                @JavascriptInterface
+                fun getCacheMaxSize(): Long {
+                    return cacheManager.maxSizeBytes
+                }
+
+                @JavascriptInterface
+                fun enforceCacheLimit() {
+                    cacheManager.enforceLimit()
+                }
             } as Any, "AndroidBridge")
 
             webViewClient = object : WebViewClient() {
@@ -428,9 +498,9 @@ class MainActivity : AppCompatActivity() {
     try { localStorage.setItem('soulsync_proxy', 'http://localhost:8080'); } catch(e) {}
     if (window.soulsync) window.soulsync.proxyUrl = 'http://localhost:8080';
 
-    // Set MP3 transcoding for Android WebView (FLAC not supported)
-    try { localStorage.setItem('navidrome_stream_format', 'mp3'); } catch(e) {}
-    if (window.__navidrome) window.__navidrome.streamFormat = 'mp3';
+    // Default to MP3 for Android WebView (FLAC not supported), preserve user preference
+    try { if (!localStorage.getItem('navidrome_stream_format')) localStorage.setItem('navidrome_stream_format', 'mp3'); } catch(e) {}
+    try { if (window.__navidrome && !window.__navidrome.streamFormat) window.__navidrome.streamFormat = 'mp3'; } catch(e) {}
 
     setInterval(function() {
         if (window.player && window.player.getState) {

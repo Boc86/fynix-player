@@ -5,6 +5,7 @@ class SettingsManager {
       navidrome_username: '',
       navidrome_password: '',
       navidrome_proxy: '',
+      navidrome_stream_format: 'auto',
       soulsync_server: '',
       soulsync_apikey: '',
       soulsync_proxy: '',
@@ -13,6 +14,7 @@ class SettingsManager {
       eqEnabled: 'false',
       equalizer: '',
       eqPreset: 'custom',
+      max_cache_size_mb: '500',
       _settingsTab: 'servers',
       _wizard_done: 'false'
     }

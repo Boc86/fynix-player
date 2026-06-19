@@ -116,10 +116,11 @@ class NavidromeClient {
     if (!this.configured) return ''
     if (this.proxyUrl) {
       const base = this.proxyUrl.replace(/\/+$/, '')
-      return `${base}/api/navidrome-stream?id=${encodeURIComponent(id)}&server=${encodeURIComponent(this.server)}&u=${encodeURIComponent(this.username)}&p=enc:${this._hexPassword()}`
+      const fmt = this.streamFormat && this.streamFormat !== 'auto' ? `&format=${encodeURIComponent(this.streamFormat)}` : ''
+      return `${base}/api/navidrome-stream?id=${encodeURIComponent(id)}&server=${encodeURIComponent(this.server)}&u=${encodeURIComponent(this.username)}&p=enc:${this._hexPassword()}${fmt}`
     }
     const params = this._baseParams()
-    const fmt = this.streamFormat ? `&format=${encodeURIComponent(this.streamFormat)}` : ''
+    const fmt = this.streamFormat && this.streamFormat !== 'auto' ? `&format=${encodeURIComponent(this.streamFormat)}` : ''
     return `${this.server.replace(/\/+$/, '')}/rest/stream.view?id=${encodeURIComponent(id)}&${params}${fmt}`
   }
 

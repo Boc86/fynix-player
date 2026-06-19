@@ -3,9 +3,18 @@
 A light-weight, self-contained Android music player that connects to [Navidrome](https://www.navidrome.org/) and [SoulSync](https://github.com/Nezreka/SoulSync) for browsing, streaming, and managing your music library. Built as a WebView wrapper with an embedded HTTP server — no external dependencies on the phone.
 
 <p>
-  <img src="screenshots/sidebar.png" width="200" alt="Home">
-  <img src="screenshots/home.png" width="200" alt="Sidebar">
+  <img src="screenshots/home.png" width="200" alt="Home">
+  <img src="screenshots/library.png" width="200" alt="Library">
+  <img src="screenshots/search.png" width="200" alt="Search">
+  <img src="screenshots/settings.png" width="200" alt="Settings">
+  <img src="screenshots/sidebar.png" width="200" alt="Sidebar">
 </p>
+
+<p>
+  <a href="https://ko-fi.com/X5Q621P6WX"><img src="https://storage.ko-fi.com/cdn/kofi6.png?v=6" height="36" alt="Buy Me a Coffee at ko-fi.com"></a>
+</p>
+
+If you find this project useful, consider supporting development on Ko-fi. Every contribution helps keep the project alive and growing.
 
 ## Features
 
@@ -51,8 +60,11 @@ A light-weight, self-contained Android music player that connects to [Navidrome]
 
 | Screen | Description |
 |--------|-------------|
-| ![Home](screenshots/sidebar.png) | Dashboard with recently played, new releases, and random picks |
-| ![Sidebar](screenshots/home.png) | Full navigation sidebar with server status and version |
+| ![Home](screenshots/home.png) | Dashboard with recently played, new releases, and random picks |
+| ![Library](screenshots/library.png) | Album library with lazy-loaded grid |
+| ![Search](screenshots/search.png) | Search view |
+| ![Settings](screenshots/settings.png) | Playback, storage, and server configuration panels |
+| ![Sidebar](screenshots/sidebar.png) | Navigation sidebar with server status and version |
 
 ## Download
 

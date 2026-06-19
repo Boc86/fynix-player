@@ -12,6 +12,7 @@ class MusicPlayer {
     this._saveTimer = null
     this._restored = false
     this._fading = false
+    this._formatRetries = {} // trackId -> [formats tried]
 
     // EQ / Web Audio
     this._eqEnabled = false
@@ -49,9 +50,36 @@ class MusicPlayer {
       this._emit('pause', this.getState())
       this._saveState()
     })
-    this.audio.addEventListener('error', (e) => this._emit('error', e))
+    this.audio.addEventListener('error', (e) => this._onError(e))
     this._restoreState()
     window.addEventListener('beforeunload', () => this._saveState())
+  }
+
+  _onError(e) {
+    const track = this.queue[this.currentIndex]
+    if (!track || !track.id) { this._emit('error', e); return }
+    const retries = this._formatRetries[track.id] || []
+    const currentUrl = this.audio.src
+    let newFormat = ''
+    if (!currentUrl.includes('format=')) {
+      if (!retries.includes('mp3')) newFormat = 'mp3'
+    } else {
+      if (!retries.includes('auto')) newFormat = 'auto'
+      else if (!retries.includes('mp3')) newFormat = 'mp3'
+    }
+    if (!newFormat) {
+      delete this._formatRetries[track.id]
+      this._emit('error', e)
+      return
+    }
+    retries.push(newFormat)
+    this._formatRetries[track.id] = retries
+    let newUrl = currentUrl.replace(/&format=[^&]*/g, '')
+    if (newFormat !== 'auto') newUrl += '&format=' + encodeURIComponent(newFormat)
+    track.streamUrl = newUrl
+    this.audio.src = newUrl
+    this.audio.load()
+    this.audio.play().catch(() => {})
   }
 
   _initEq() {
@@ -247,6 +275,15 @@ class MusicPlayer {
       }
       delete this._savedCurrentTime
     }
+    this._autoCache()
+  }
+
+  _autoCache() {
+    if (!window.AndroidBridge || !window.cacheTrack) return
+    const track = this.queue[this.currentIndex]
+    if (track) window.cacheTrack(track)
+    const next = this.queue[this.currentIndex + 1]
+    if (next) window.cacheTrack(next)
   }
 
   togglePlay() {

@@ -11,6 +11,9 @@
   let albumHistoryView = 'home'
   let libraryState = { tab: 'albums', search: '', sortBy: 'name', albums: null, artists: null, tracks: null }
   let _allGenres = []
+  let _cachedTracks = {}
+  let _cachingTracks = {}
+  let _origStreamUrl = null
 
   function $(sel, ctx = document) { return ctx.querySelector(sel) }
   function $$(sel, ctx = document) { return [...ctx.querySelectorAll(sel)] }
@@ -368,6 +371,14 @@
       bindSearch()
       bindKeyboard()
       applySavedSettings()
+      if (window.AndroidBridge) {
+        _refreshCachedTracks()
+        const mb = parseInt(settings.load().max_cache_size_mb) || 500
+        AndroidBridge.setCacheMaxSize(mb * 1048576)
+        _origStreamUrl = navidrome.streamUrl.bind(navidrome)
+        navidrome.streamUrl = (id) => _getCachedUrl(id) || _origStreamUrl(id)
+      }
+      _initKofi()
       const s = settings.load()
       if (s._wizard_done !== 'true' && s._wizard_done !== true) {
         navigate('home')
@@ -486,7 +497,8 @@
         server: s.navidrome_server,
         username: s.navidrome_username,
         password: s.navidrome_password,
-        proxyUrl: s.navidrome_proxy
+        proxyUrl: s.navidrome_proxy,
+        streamFormat: s.navidrome_stream_format
       })
     }
     if (s.soulsync_server) {
@@ -529,6 +541,7 @@
           <a href="#" data-view="genres" class="nav-item">${icons.genre} Genres</a>
           <a href="#" data-view="settings" class="nav-item">${icons.settings} Settings</a>
         </nav>
+        <div class="sidebar-kofi" id="sidebar-kofi"></div>
         <div class="sidebar-status" id="sidebar-status"></div>
       </aside>
 
@@ -664,6 +677,225 @@
 
   function getAppVersion() {
     return window.AndroidBridge?.getVersion?.() || '1.0.0'
+  }
+
+  // --- Offline Cache ---
+
+  function _refreshCachedTracks() {
+    if (!window.AndroidBridge) return
+    try {
+      const arr = JSON.parse(AndroidBridge.getCachedTracks())
+      _cachedTracks = {}
+      arr.forEach(t => { _cachedTracks[t.trackId] = t })
+    } catch (_) {}
+  }
+
+  function _isCached(trackId) { return !!_cachedTracks[trackId] }
+
+  function _getCachedUrl(trackId) {
+    return _isCached(trackId) ? 'http://localhost:8080/api/cached/' + trackId : ''
+  }
+
+  function cacheTrack(track) {
+    if (!window.AndroidBridge || _cachingTracks[track.id] || _isCached(track.id)) return
+    _cachingTracks[track.id] = true
+    const url = _origStreamUrl ? _origStreamUrl(track.id) : navidrome.streamUrl(track.id)
+    AndroidBridge.cacheTrack(
+      track.id, url,
+      track.title || track.name || '',
+      track.artist || track.artist_name || track.albumArtist || '',
+      track.albumName || track.album || '',
+      track.duration || 0
+    )
+    const poll = setInterval(() => {
+      try {
+        if (AndroidBridge.isCached(track.id)) {
+          clearInterval(poll)
+          delete _cachingTracks[track.id]
+          _refreshCachedTracks()
+          _updateCacheUI()
+        }
+      } catch (_) {}
+    }, 1000)
+  }
+  window.cacheTrack = cacheTrack
+
+  function _onCacheBtnClick(e) {
+    const btn = e.target.closest('.cache-btn')
+    if (!btn || btn.classList.contains('caching')) return
+    const trackId = btn.dataset.trackId
+    if (!trackId) return
+    if (_isCached(trackId) || btn.dataset.action === 'delete') {
+      AndroidBridge.deleteCachedTrack(trackId)
+      _refreshCachedTracks()
+      _updateCacheUI()
+      _renderCachedTracks()
+      return
+    }
+    const track = {
+      id: trackId,
+      title: btn.dataset.title || '',
+      artist: btn.dataset.artist || '',
+      album: btn.dataset.album || '',
+      duration: parseInt(btn.dataset.duration) || 0
+    }
+    cacheTrack(track)
+  }
+
+  function _cacheBtnHtml(trackId, title, artist, album, duration) {
+    if (!window.AndroidBridge) return ''
+    if (_cachingTracks[trackId]) return '<span class="cache-btn caching" title="Downloading...">\u23F3</span>'
+    const cached = _isCached(trackId)
+    const escapedTitle = escHtml(title || '')
+    const escapedArtist = escHtml(artist || '')
+    const escapedAlbum = escHtml(album || '')
+    const dur = duration || 0
+    return '<span class="cache-btn" data-track-id="' + trackId + '" data-title="' + escapedTitle + '" data-artist="' + escapedArtist + '" data-album="' + escapedAlbum + '" data-duration="' + dur + '" title="' + (cached ? 'Cached' : 'Cache for offline') + '" style="cursor:pointer;opacity:' + (cached ? '1' : '.5') + '">' + (cached ? '\u2713' : '\u2B07') + '</span>'
+  }
+
+  function _updateCacheUI() {
+    $$('.cache-btn:not(.caching)').forEach(el => {
+      const id = el.dataset.trackId
+      if (!id) return
+      const cached = _isCached(id)
+      el.textContent = cached ? '\u2713' : '\u2B07'
+      el.title = cached ? 'Cached' : 'Cache for offline'
+      el.style.opacity = cached ? '1' : '.5'
+    })
+    const stats = $('#cache-stats')
+    if (stats && window.AndroidBridge) {
+      try {
+        const s = JSON.parse(AndroidBridge.getCacheStats())
+        const maxMb = parseInt(settings.load().max_cache_size_mb) || 500
+        stats.textContent = s.count + ' tracks, ' + (s.sizeBytes / 1048576).toFixed(1) + ' MB / ' + maxMb + ' MB max'
+      } catch (_) {}
+    }
+  }
+
+  function _renderCachedTracks() {
+    const list = $('#cached-tracks-list')
+    if (!list) return
+    const ids = Object.keys(_cachedTracks)
+    if (!ids.length) {
+      list.innerHTML = '<p class="settings-desc" style="margin-top:8px">No cached tracks yet. Tap the download icon next to a track to cache it.</p>'
+      return
+    }
+    list.innerHTML = '<ul class="cached-tracks-list">' + ids.map(id => {
+      const t = _cachedTracks[id]
+      return '<li style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border-color)">' +
+        '<span style="flex:1">' + escHtml(t.title) + ' — ' + escHtml(t.artist) + '</span>' +
+        '<span style="font-size:.8em;opacity:.6">' + (t.fileSize ? (t.fileSize / 1048576).toFixed(1) + ' MB' : '') + '</span>' +
+        '<span class="cache-btn" data-action="delete" data-track-id="' + id + '" title="Remove from cache" style="cursor:pointer;opacity:.7;font-size:1.1em">\u2716</span>' +
+        '</li>'
+    }).join('') + '</ul>'
+  }
+
+  function _bindCacheSizeSlider() {
+    const slider = $('#s-max-cache')
+    const valEl = $('#s-max-cache-val')
+    if (!slider || !valEl) return
+    slider.addEventListener('input', () => {
+      valEl.textContent = slider.value + ' MB'
+    })
+    slider.addEventListener('change', () => {
+      const mb = parseInt(slider.value) || 500
+      settings.save({ max_cache_size_mb: String(mb) })
+      if (window.AndroidBridge) {
+        AndroidBridge.setCacheMaxSize(mb * 1048576)
+        AndroidBridge.enforceCacheLimit()
+      }
+      _refreshCachedTracks()
+      _updateCacheUI()
+      _renderCachedTracks()
+    })
+  }
+
+  // --- Custom Dropdown ---
+
+  function _initKofi() {
+    const container = $('#sidebar-kofi')
+    if (!container) return
+    container.innerHTML = '<a href="https://ko-fi.com/X5Q621P6WX" target="_blank" rel="noopener" onclick="if(window.AndroidBridge){AndroidBridge.openUrl(\'https://ko-fi.com/X5Q621P6WX\');return false}"><img height="32" style="border:0;height:32px;opacity:.8" src="https://storage.ko-fi.com/cdn/kofi6.png?v=6" alt="Buy Me a Coffee at ko-fi.com"></a>'
+  }
+
+  function _customSelect(id, options, value, onChange) {
+    const html = '<div class="custom-select" id="' + id + '">' +
+      '<button class="custom-select-trigger" type="button">' +
+        '<span class="custom-select-label">' + escHtml(options[value] || value || '') + '</span>' +
+      '</button>' +
+      '<div class="custom-select-popup">' +
+        Object.entries(options).map(([k, v]) =>
+          '<div class="custom-select-option' + (k === value ? ' selected' : '') + '" data-value="' + k + '">' + escHtml(v) + '</div>'
+        ).join('') +
+      '</div>' +
+    '</div>'
+
+    return html
+  }
+
+  function _bindCustomSelect(id, options, onChange) {
+    const container = $('#' + id)
+    if (!container) return
+    const trigger = container.querySelector('.custom-select-trigger')
+    const label = container.querySelector('.custom-select-label')
+    const popup = container.querySelector('.custom-select-popup')
+
+    function close() {
+      container.classList.remove('open')
+      popup.style.display = 'none'
+      popup.style.top = ''
+      popup.style.left = ''
+      popup.style.width = ''
+    }
+
+    function positionPopup() {
+      const rect = trigger.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - rect.bottom
+      const popupHeight = Math.min(popup.scrollHeight || 200, 240)
+      popup.style.width = Math.max(rect.width, 140) + 'px'
+      popup.style.left = rect.left + 'px'
+      if (spaceBelow >= popupHeight + 8 || spaceBelow >= rect.top) {
+        popup.style.top = (rect.bottom + 4) + 'px'
+        popup.style.bottom = 'auto'
+      } else {
+        popup.style.top = 'auto'
+        popup.style.bottom = (window.innerHeight - rect.top + 4) + 'px'
+      }
+    }
+
+    trigger.addEventListener('click', e => {
+      e.stopPropagation()
+      const opening = !container.classList.contains('open')
+      close()
+      if (opening) {
+        container.classList.add('open')
+        popup.style.display = 'block'
+        positionPopup()
+      }
+    })
+
+    popup.addEventListener('click', e => {
+      const opt = e.target.closest('.custom-select-option')
+      if (!opt) return
+      const val = opt.dataset.value
+      container.querySelectorAll('.custom-select-option').forEach(o => o.classList.toggle('selected', o.dataset.value === val))
+      label.textContent = options[val]
+      close()
+      if (onChange) onChange(val)
+    })
+
+    document.addEventListener('click', close, { capture: true })
+
+    // Reposition on scroll/resize
+    const scrollable = container.closest('.main-content')
+    if (scrollable) {
+      scrollable.addEventListener('scroll', () => {
+        if (container.classList.contains('open')) positionPopup()
+      })
+    }
+    window.addEventListener('resize', () => {
+      if (container.classList.contains('open')) positionPopup()
+    })
   }
 
   function bindNavigation() {
@@ -972,6 +1204,7 @@
               <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist(null,'${escHtml(t.artist || '').replace(/'/g, "\\'")}')">${escHtml(t.artist || '')}</a> · <a class="meta-link" onclick="event.stopPropagation();showAlbum(null,'${escHtml(t.album || '').replace(/'/g, "\\'")}','${escHtml(t.artist || '').replace(/'/g, "\\'")}')">${escHtml(t.album || '')}</a></div>
             </div>
             ${_starBtnHtml(t.id, !!t.starred)}
+            ${_cacheBtnHtml(t.id, t.title, t.artist || t.albumArtist, t.album || t.albumName, t.duration)}
             <span class="track-duration">${player.formatTime(t.duration)}</span>
           </div>`).join('')}</div>
       `
@@ -1186,6 +1419,7 @@
                 <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist(null,'${escHtml(t.artist || '').replace(/'/g, "\\'")}')">${escHtml(t.artist || '')}</a> · <a class="meta-link" onclick="event.stopPropagation();showAlbum(null,'${escHtml(t.album || '').replace(/'/g, "\\'")}','${escHtml(t.artist || '').replace(/'/g, "\\'")}')">${escHtml(t.album || '')}</a></div>
               </div>
               ${_starBtnHtml(t.id, !!t.starred)}
+              ${_cacheBtnHtml(t.id, t.title, t.artist || t.artist_name || t.albumArtist, t.album || t.albumName, t.duration)}
               <span class="track-duration">${player.formatTime(t.duration)}</span>
             </div>
           `).join('')}</div>`
@@ -1620,6 +1854,7 @@
           <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist('${escHtml(s.artistId || '')}','${escHtml(s.artist || album.artist || '').replace(/'/g, "\\'")}')">${escHtml(s.artist || album.artist || '')}</a></div>
         </div>
         ${_starBtnHtml(s.id, !!s.starred)}
+        ${_cacheBtnHtml(s.id, s.title, s.artist || album.artist, album.name, s.duration)}
         <span class="track-duration">${player.formatTime(s.duration)}</span>
       </div>
     `).join('')
@@ -2048,6 +2283,14 @@
       if (e.target.closest('#settings-test-soulsync')) testSoulSync()
       if (e.target.closest('#settings-rescan-btn')) rescanLibrary()
       if (e.target.closest('#settings-wizard-btn')) restartWizard()
+      if (e.target.closest('#settings-clear-cache') && window.AndroidBridge) {
+        if (confirm('Clear all cached tracks?')) {
+          AndroidBridge.clearCache()
+          _cachedTracks = {}
+          _updateCacheUI()
+          _renderCachedTracks()
+        }
+      }
     })
   }
 
@@ -2061,6 +2304,7 @@
         <button class="settings-tab ${activeTab === 'playback' ? 'active' : ''}" data-stab="playback">Playback</button>
         <button class="settings-tab ${activeTab === 'equalizer' ? 'active' : ''}" data-stab="equalizer">Equalizer</button>
         <button class="settings-tab ${activeTab === 'wishlist' ? 'active' : ''}" data-stab="wishlist">Wishlist</button>
+        <button class="settings-tab ${activeTab === 'storage' ? 'active' : ''}" data-stab="storage">Storage</button>
       </div>
       <div class="settings-tab-content" id="settings-tab-content"></div>
     `
@@ -2110,6 +2354,7 @@
         break
       }
       case 'playback': {
+        const formatOpts = { auto: 'Auto (native)', mp3: 'MP3', flac: 'FLAC', aac: 'AAC', ogg: 'OGG', wav: 'WAV' }
         el.innerHTML = `
           <form id="settings-form" class="settings-form" onsubmit="return false">
             <section class="settings-section">
@@ -2122,10 +2367,17 @@
                 <input type="checkbox" id="s-gapless" ${s.gapless !== false ? 'checked' : ''}>
                 Gapless playback
               </label>
+              <div class="settings-field">
+                <span class="settings-field-label">Stream format</span>
+                ${_customSelect('s-format', formatOpts, s.navidrome_stream_format || 'auto')}
+              </div>
             </section>
             <button type="button" class="btn btn-primary" id="settings-save">Save Settings</button>
           </form>
         `
+        _bindCustomSelect('s-format', formatOpts, val => {
+          settings.save({ navidrome_stream_format: val })
+        })
         const cf = $('#s-crossfade')
         cf?.addEventListener('input', () => {
           const val = document.getElementById('s-crossfade-val')
@@ -2146,6 +2398,9 @@
         }
         const eqVals = s.equalizer || bands.map(() => 0)
         const eqPresetName = s.eqPreset || 'custom'
+        const eqPresetOpts = {}
+        Object.keys(eqPresets).forEach(name => { eqPresetOpts[name] = name.charAt(0).toUpperCase() + name.slice(1) })
+        eqPresetOpts.custom = 'Custom'
         el.innerHTML = `
           <form id="settings-form" class="settings-form" onsubmit="return false">
             <section class="settings-section">
@@ -2156,11 +2411,8 @@
                 Enable Equalizer
               </label>
               <div class="eq-presets">
-                <label>Preset</label>
-                <select id="s-eq-preset" class="input" style="width:auto">
-                  ${Object.keys(eqPresets).map(name => `<option value="${name}" ${eqPresetName === name ? 'selected' : ''}>${name.charAt(0).toUpperCase() + name.slice(1)}</option>`).join('')}
-                  <option value="custom" ${eqPresetName === 'custom' ? 'selected' : ''}>Custom</option>
-                </select>
+                <span class="settings-field-label">Preset</span>
+                ${_customSelect('s-eq-preset', eqPresetOpts, eqPresetName)}
               </div>
               <div class="eq-bands" id="eq-bands">
                 ${bands.map((band, i) => `
@@ -2175,9 +2427,8 @@
             <button type="button" class="btn btn-primary" id="settings-save">Save Settings</button>
           </form>
         `
-        const eqPresetEl = $('#s-eq-preset')
-        eqPresetEl?.addEventListener('change', () => {
-          const preset = eqPresets[eqPresetEl.value]
+        _bindCustomSelect('s-eq-preset', eqPresetOpts, val => {
+          const preset = eqPresets[val]
           if (!preset) return
           $$('.eq-slider').forEach((sl, i) => {
             if (preset[i] != null) {
@@ -2186,13 +2437,20 @@
               if (valEl) valEl.textContent = preset[i] + 'dB'
             }
           })
+          settings.save({ eqPreset: val })
           if ($('#s-eq-enabled')?.checked) applyEq()
         })
         $$('.eq-slider').forEach(slider => {
           slider.addEventListener('input', () => {
             const valEl = slider.parentNode.querySelector('.eq-value')
             if (valEl) valEl.textContent = slider.value + 'dB'
-            if (eqPresetEl) eqPresetEl.value = 'custom'
+            const presetSelect = $('#s-eq-preset')
+            if (presetSelect) {
+              const label = presetSelect.querySelector('.custom-select-label')
+              if (label) label.textContent = 'Custom'
+              presetSelect.querySelectorAll('.custom-select-option').forEach(o => o.classList.toggle('selected', o.dataset.value === 'custom'))
+            }
+            settings.save({ eqPreset: 'custom' })
             if ($('#s-eq-enabled')?.checked) applyEq()
           })
         })
@@ -2206,6 +2464,29 @@
           </section>
         `
         setTimeout(() => loadWishlistInSettings(), 0)
+        break
+      }
+      case 'storage': {
+        if (!window.AndroidBridge) {
+          el.innerHTML = '<div class="settings-section"><p class="settings-desc">Storage management is only available on Android.</p></div>'
+          break
+        }
+        const s = settings.load()
+        const maxMb = parseInt(s.max_cache_size_mb) || 500
+        el.innerHTML = `
+          <section class="settings-section">
+            <h3>Offline Storage</h3>
+            <p class="settings-desc" id="cache-stats"></p>
+            <label style="display:flex;align-items:center;gap:8px;margin:8px 0">
+              <span style="white-space:nowrap">Max cache size:</span>
+              <input type="range" id="s-max-cache" min="50" max="5000" step="50" value="${maxMb}" style="flex:1">
+              <span id="s-max-cache-val" style="min-width:60px;text-align:right">${maxMb} MB</span>
+            </label>
+            <div id="cached-tracks-list"></div>
+            <button type="button" class="btn btn-danger" id="settings-clear-cache" style="margin-top:12px">Clear All Cached Tracks</button>
+          </section>
+        `
+        setTimeout(() => { _updateCacheUI(); _renderCachedTracks(); _bindCacheSizeSlider() }, 0)
         break
       }
     }
@@ -2227,11 +2508,16 @@
     if ($('#s-gapless')) {
       s.gapless = $('#s-gapless')?.checked !== false
     }
+    if ($('#s-format')?.classList?.contains('custom-select')) {
+      const sel = $('#s-format')
+      const label = sel?.querySelector('.custom-select-label')
+      if (label) {
+        const formatMap = { 'Auto (native)': 'auto', 'MP3': 'mp3', 'FLAC': 'flac', 'AAC': 'aac', 'OGG': 'ogg', 'WAV': 'wav' }
+        s.navidrome_stream_format = formatMap[label.textContent] || 'auto'
+      }
+    }
     if ($('#s-eq-enabled')) {
       s.eqEnabled = $('#s-eq-enabled')?.checked || false
-    }
-    if ($('#s-eq-preset')) {
-      s.eqPreset = $('#s-eq-preset')?.value || 'custom'
     }
     const eqSliders = $$('.eq-slider')
     if (eqSliders.length) {
@@ -2241,7 +2527,8 @@
     Object.assign(navidrome, {
       server: s.navidrome_server,
       username: s.navidrome_username,
-      password: s.navidrome_password
+      password: s.navidrome_password,
+      streamFormat: s.navidrome_stream_format
     })
     if (window.AndroidBridge) {
       s.soulsync_proxy = 'http://localhost:8080'
@@ -3960,6 +4247,7 @@
       if (sleepPopup && sleepPopup.style.display !== 'none' && !e.target.closest('.sleep-btn') && !e.target.closest('.sleep-popup')) {
         sleepPopup.style.display = 'none'
       }
+      if (e.target.closest('.cache-btn')) _onCacheBtnClick(e)
     })
 
     // End-of-track detection
