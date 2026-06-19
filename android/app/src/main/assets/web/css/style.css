@@ -543,6 +543,8 @@ html, body {
 }
 .ctrl-play .icon-wrap svg {
   position: absolute;
+  inset: 0;
+  margin: auto;
   transition: opacity .2s, transform .2s;
 }
 .ctrl-play .icon-play { opacity: 1; transform: scale(1); }
