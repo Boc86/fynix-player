@@ -1816,16 +1816,26 @@
   }
 
   function saveSettings() {
-    const s = {
-      navidrome_server: $('#s-nav-server')?.value || '',
-      navidrome_username: $('#s-nav-user')?.value || '',
-      navidrome_password: $('#s-nav-pass')?.value || '',
-      soulsync_server: $('#s-ss-server')?.value || '',
-      soulsync_apikey: $('#s-ss-key')?.value || '',
-      crossfade: $('#s-crossfade')?.value || '0',
-      gapless: $('#s-gapless')?.checked !== false,
-      eqEnabled: $('#s-eq-enabled')?.checked || false,
-      eqPreset: $('#s-eq-preset')?.value || 'custom'
+    const existing = settings.load()
+    const s = { ...existing }
+    if ($('#s-nav-server')) {
+      s.navidrome_server = $('#s-nav-server')?.value || ''
+      s.navidrome_username = $('#s-nav-user')?.value || ''
+      s.navidrome_password = $('#s-nav-pass')?.value || ''
+      s.soulsync_server = $('#s-ss-server')?.value || ''
+      s.soulsync_apikey = $('#s-ss-key')?.value || ''
+    }
+    if ($('#s-crossfade')) {
+      s.crossfade = $('#s-crossfade')?.value || '0'
+    }
+    if ($('#s-gapless')) {
+      s.gapless = $('#s-gapless')?.checked !== false
+    }
+    if ($('#s-eq-enabled')) {
+      s.eqEnabled = $('#s-eq-enabled')?.checked || false
+    }
+    if ($('#s-eq-preset')) {
+      s.eqPreset = $('#s-eq-preset')?.value || 'custom'
     }
     const eqSliders = $$('.eq-slider')
     if (eqSliders.length) {
