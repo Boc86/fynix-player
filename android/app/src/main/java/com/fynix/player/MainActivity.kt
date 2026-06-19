@@ -305,26 +305,26 @@ class MainActivity : AppCompatActivity() {
     // Restore all settings from SharedPreferences into localStorage
     try {
         var nav = JSON.parse(AndroidBridge.getNavidromeSettings());
-        if (nav.server && nav.username && nav.password) {
-            localStorage.setItem('navidrome_server', nav.server);
-            localStorage.setItem('navidrome_username', nav.username);
-            localStorage.setItem('navidrome_password', nav.password);
+        if (nav.server || nav.username || nav.password) {
+            if (nav.server) localStorage.setItem('navidrome_server', nav.server);
+            if (nav.username) localStorage.setItem('navidrome_username', nav.username);
+            if (nav.password) localStorage.setItem('navidrome_password', nav.password);
             if (window.__navidrome) {
-                window.__navidrome.server = nav.server;
-                window.__navidrome.username = nav.username;
-                window.__navidrome.password = nav.password;
+                if (nav.server) window.__navidrome.server = nav.server;
+                if (nav.username) window.__navidrome.username = nav.username;
+                if (nav.password) window.__navidrome.password = nav.password;
             }
         }
     } catch(e) { console.log('nav restore error:', e); }
 
     try {
         var ss = JSON.parse(AndroidBridge.getSoulSyncSettings());
-        if (ss.server && ss.apiKey) {
-            localStorage.setItem('soulsync_server', ss.server);
-            localStorage.setItem('soulsync_apikey', ss.apiKey);
+        if (ss.server || ss.apiKey) {
+            if (ss.server) localStorage.setItem('soulsync_server', ss.server);
+            if (ss.apiKey) localStorage.setItem('soulsync_apikey', ss.apiKey);
             if (window.soulsync) {
-                window.soulsync.server = ss.server;
-                window.soulsync.apiKey = ss.apiKey;
+                if (ss.server) window.soulsync.server = ss.server;
+                if (ss.apiKey) window.soulsync.apiKey = ss.apiKey;
             }
         }
     } catch(e) { console.log('soulsync restore error:', e); }
@@ -372,6 +372,9 @@ class MainActivity : AppCompatActivity() {
 
     pushSettingsToAndroid();
     setTimeout(pushSettingsToAndroid, 1000);
+
+    // Periodic backup: sync localStorage → SharedPreferences every 10s
+    setInterval(pushSettingsToAndroid, 10000);
 
     function sendUpdate() {
         var p = window.player;
