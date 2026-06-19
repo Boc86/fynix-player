@@ -6,13 +6,41 @@ class MusicPlayer {
     this.currentIndex = -1
     this.repeat = false
     this.shuffle = false
+    this.crossfade = 0 // seconds
+    this._savedVolume = 1
     this.listeners = {}
     this._saveTimer = null
     this._restored = false
+    this._fading = false
+
+    // EQ / Web Audio
+    this._eqEnabled = false
+    this._audioCtx = null
+    this._eqNodes = []
+    this._gainNode = null
+
+    this._eqBands = [
+      { freq: 60, type: 'lowshelf' },
+      { freq: 170, type: 'peaking', Q: 0.7 },
+      { freq: 310, type: 'peaking', Q: 0.7 },
+      { freq: 600, type: 'peaking', Q: 0.7 },
+      { freq: 1000, type: 'peaking', Q: 0.7 },
+      { freq: 3000, type: 'peaking', Q: 0.7 },
+      { freq: 6000, type: 'peaking', Q: 0.7 },
+      { freq: 12000, type: 'peaking', Q: 0.7 },
+      { freq: 14000, type: 'peaking', Q: 0.7 },
+      { freq: 16000, type: 'highshelf' }
+    ]
+
+    // Gapless preloader
+    this._preloadAudio = new Audio()
+    this._preloadAudio.preload = 'auto'
+    this._gapless = true
 
     this.audio.addEventListener('timeupdate', () => {
       this._emit('timeupdate', this.getState())
       this._scheduleSave()
+      this._checkPreload()
     })
     this.audio.addEventListener('ended', () => this._onEnded())
     this.audio.addEventListener('loadedmetadata', () => this._emit('loaded', this.getState()))
@@ -24,6 +52,68 @@ class MusicPlayer {
     this.audio.addEventListener('error', (e) => this._emit('error', e))
     this._restoreState()
     window.addEventListener('beforeunload', () => this._saveState())
+  }
+
+  _initEq() {
+    if (this._audioCtx) return
+    try {
+      this._audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      const src = this._audioCtx.createMediaElementSource(this.audio)
+      this._gainNode = this._audioCtx.createGain()
+      this._gainNode.gain.value = 1
+      let prevNode = src
+      this._eqNodes = this._eqBands.map(band => {
+        const filter = this._audioCtx.createBiquadFilter()
+        filter.type = band.type
+        filter.frequency.value = band.freq
+        filter.Q.value = band.Q || 0.7
+        filter.gain.value = 0
+        prevNode.connect(filter)
+        prevNode = filter
+        return filter
+      })
+      prevNode.connect(this._gainNode)
+      this._gainNode.connect(this._audioCtx.destination)
+    } catch (_) {}
+  }
+
+  setEq(gains) {
+    this._eqEnabled = true
+    this._initEq()
+    if (!this._audioCtx) return
+    if (this._audioCtx.state === 'suspended') this._audioCtx.resume()
+    this._eqNodes.forEach((node, i) => {
+      const g = gains[i] != null ? gains[i] : 0
+      node.gain.value = Math.max(-12, Math.min(12, g))
+    })
+  }
+
+  disableEq() {
+    this._eqEnabled = false
+  }
+
+  setGapless(on) {
+    this._gapless = on
+    if (!on) { this._preloadAudio.pause(); this._preloadAudio.src = '' }
+  }
+
+  _checkPreload() {
+    if (!this._gapless) return
+    const dur = this.audio.duration
+    if (!dur || dur <= 0) return
+    const timeLeft = dur - this.audio.currentTime
+    if (timeLeft > 0 && timeLeft < 8 && !this._preloading) this._preloadNext()
+  }
+
+  _preloadNext() {
+    let nextIdx = this.shuffle ? Math.floor(Math.random() * this.queue.length) : this.currentIndex + 1
+    if (nextIdx >= this.queue.length) nextIdx = this.repeat ? 0 : -1
+    if (nextIdx < 0 || nextIdx >= this.queue.length) return
+    const nextTrack = this.queue[nextIdx]
+    if (!nextTrack?.streamUrl || this._preloadAudio.src === nextTrack.streamUrl) return
+    this._preloading = true
+    this._preloadAudio.src = nextTrack.streamUrl
+    this._preloadAudio.load()
   }
 
   _scheduleSave() {
@@ -176,7 +266,49 @@ class MusicPlayer {
   }
 
   setVolume(v) {
+    if (this._fading) return
     this.audio.volume = Math.max(0, Math.min(1, v))
+    this._savedVolume = this.audio.volume
+  }
+
+  setCrossfade(seconds) {
+    this.crossfade = Math.max(0, Math.min(10, seconds))
+  }
+
+  _fadeOut(callback) {
+    const dur = this.crossfade
+    if (dur <= 0 || this.audio.volume <= 0) { callback(); return }
+    this._fading = true
+    const startVol = this.audio.volume
+    const startTime = performance.now()
+    const step = () => {
+      const elapsed = (performance.now() - startTime) / 1000
+      const pct = Math.min(elapsed / dur, 1)
+      this.audio.volume = Math.max(0, startVol * (1 - pct))
+      if (pct < 1) {
+        requestAnimationFrame(step)
+      } else {
+        this.audio.volume = 0
+        this._fading = false
+        callback()
+      }
+    }
+    requestAnimationFrame(step)
+  }
+
+  _fadeIn() {
+    const dur = this.crossfade
+    if (dur <= 0) { this.audio.volume = this._savedVolume; return }
+    const target = this._savedVolume
+    this.audio.volume = 0
+    const startTime = performance.now()
+    const step = () => {
+      const elapsed = (performance.now() - startTime) / 1000
+      const pct = Math.min(elapsed / dur, 1)
+      this.audio.volume = target * pct
+      if (pct < 1) requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
   }
 
   next() {
@@ -189,10 +321,9 @@ class MusicPlayer {
       }
     }
     if (this.currentIndex >= 0 && this.currentIndex < this.queue.length) {
-      this._loadCurrent()
+      this._fadeOut(() => { this._loadCurrent(); this._fadeIn() })
     } else {
-      this.audio.pause()
-      this.audio.src = ''
+      this._fadeOut(() => { this.audio.pause(); this.audio.src = '' })
     }
   }
 
@@ -205,11 +336,15 @@ class MusicPlayer {
     if (this.currentIndex < 0) {
       this.currentIndex = this.repeat ? this.queue.length - 1 : 0
     }
-    this._loadCurrent()
+    this._fadeOut(() => { this._loadCurrent(); this._fadeIn() })
   }
 
   _onEnded() {
-    this.next()
+    if (this.crossfade > 0 && this.currentIndex + 1 < this.queue.length) {
+      this.next()
+    } else {
+      this.next()
+    }
   }
 
   toggleRepeat() {
@@ -218,6 +353,14 @@ class MusicPlayer {
 
   toggleShuffle() {
     this.shuffle = !this.shuffle
+  }
+
+  addToQueue(track) {
+    this.queue.push(track)
+  }
+
+  playNext(track) {
+    this.queue.splice(this.currentIndex + 1, 0, track)
   }
 
   clearQueue() {
@@ -233,6 +376,18 @@ class MusicPlayer {
     }
     this.queue.splice(index, 1)
     if (index < this.currentIndex) this.currentIndex--
+  }
+
+  moveInQueue(fromIdx, toIdx) {
+    if (fromIdx === toIdx) return
+    const [item] = this.queue.splice(fromIdx, 1)
+    this.queue.splice(toIdx, 0, item)
+    if (this.currentIndex === fromIdx) {
+      this.currentIndex = toIdx
+    } else {
+      if (fromIdx < this.currentIndex && toIdx >= this.currentIndex) this.currentIndex--
+      else if (fromIdx > this.currentIndex && toIdx <= this.currentIndex) this.currentIndex++
+    }
   }
 
   formatTime(seconds) {

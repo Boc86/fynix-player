@@ -9,7 +9,8 @@
   let previousView = 'home'
   let searchResults = { navidrome: null, soulsync: null }
   let albumHistoryView = 'home'
-  let libraryState = { tab: 'albums', search: '', albums: null, artists: null, tracks: null }
+  let libraryState = { tab: 'albums', search: '', sortBy: 'name', albums: null, artists: null, tracks: null }
+  let _allGenres = []
 
   function $(sel, ctx = document) { return ctx.querySelector(sel) }
   function $$(sel, ctx = document) { return [...ctx.querySelectorAll(sel)] }
@@ -34,7 +35,11 @@
     delete: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
     playlist: '<svg viewBox="0 0 24 24"><path d="M14 10H3v2h11v-2zm0-4H3v2h11V6zM3 16h7v-2H3v2zm11-1v6l5-3-5-3z"/></svg>',
     menu: '<svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>',
-    info: '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>'
+    info: '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>',
+    heart: '<svg viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.31C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3z"/></svg>',
+    heartFilled: '<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>',
+    genre: '<svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>',
+    pip: '<svg viewBox="0 0 24 24"><path d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z"/></svg>'
   }
 
   function init() {
@@ -103,16 +108,45 @@
     // Show now-playing bar
     const npb = byId('now-playing-bar')
     if (npb) npb.style.display = ''
+    // Bottom bar star
+    const barStar = byId('np-bar-star')
+    if (barStar && track.id) {
+      barStar.style.display = ''
+      barStar.dataset.id = track.id
+      const starred = !!track.starred
+      barStar.dataset.starred = starred
+      barStar.classList.toggle('starred', starred)
+      barStar.innerHTML = icons[starred ? 'heartFilled' : 'heart']
+    }
+    // Overlay star
+    const overlayStar = byId('np-overlay-star')
+    if (overlayStar && track.id) {
+      overlayStar.style.display = ''
+      overlayStar.dataset.id = track.id
+      const starred = !!track.starred
+      overlayStar.dataset.starred = starred
+      overlayStar.classList.toggle('starred', starred)
+      overlayStar.innerHTML = icons[starred ? 'heartFilled' : 'heart']
+    }
     // Background + color extraction
     const bgImg = byId('np-overlay-bg-img')
     if (bgImg) bgImg.src = coverSrc
     _extractColors(coverSrc)
+    // Remaining time
+    const remEl = byId('np-remaining')
+    const remOverlay = byId('np-overlay-remaining')
+    const remText = dur ? '-' + player.formatTime(dur - savedTime) : ''
+    if (remEl) { remEl.textContent = remText; remEl.style.display = remText ? '' : 'none' }
+    if (remOverlay) { remOverlay.textContent = remText; remOverlay.style.display = remText ? '' : 'none' }
     // Load audio to get correct duration/currentTime, seek to saved position
     player._loadCurrent(wasPlaying)
   }
 
   function applySavedSettings() {
     const s = settings.load()
+    if (s.crossfade) player.setCrossfade(parseFloat(s.crossfade) || 0)
+    player.setGapless(s.gapless !== false)
+    if (s.eqEnabled && s.equalizer) player.setEq(s.equalizer)
     // On Android, default SoulSync proxy to local server (for CORS)
     if (window.AndroidBridge && !s.soulsync_proxy) {
       s.soulsync_proxy = 'http://localhost:8080'
@@ -167,6 +201,7 @@
           <hr class="nav-divider">
           <a href="#" data-view="queue" class="nav-item">${icons.queue} Queue</a>
           <a href="#" data-view="playlists" class="nav-item">${icons.playlist} Playlists</a>
+          <a href="#" data-view="genres" class="nav-item">${icons.genre} Genres</a>
           <a href="#" data-view="settings" class="nav-item">${icons.settings} Settings</a>
         </nav>
         <div class="sidebar-status" id="sidebar-status"></div>
@@ -179,7 +214,12 @@
         <div class="view hidden" id="view-search"></div>
         <div class="view hidden" id="view-settings"></div>
         <div class="view hidden" id="view-queue"></div>
+        <div class="view hidden" id="view-genres"></div>
         <div class="view hidden" id="view-playlists"></div>
+        <div class="view hidden" id="view-genre-tracks"></div>
+        <div class="context-menu" id="context-menu" onclick="closeContextMenu()">
+          <div class="context-menu-content" onclick="event.stopPropagation()"></div>
+        </div>
         <div class="bio-modal" id="bio-modal" onclick="closeBioModal()">
           <div class="bio-modal-content" onclick="event.stopPropagation()">
             <button class="bio-modal-close" onclick="closeBioModal()">&times;</button>
@@ -198,6 +238,7 @@
             <div class="np-artist" id="np-artist"></div>
             <div class="np-album" id="np-album"></div>
           </div>
+          <button class="star-btn np-star" id="np-bar-star" style="display:none" onclick="event.stopPropagation();toggleStar(this)" title="Love"></button>
         </div>
         <div class="np-center">
           <div class="np-controls">
@@ -211,6 +252,7 @@
         <div class="np-right">
           <div class="np-progress" id="np-progress-desktop">
             <span class="np-time" id="np-current">0:00</span>
+            <span class="np-time np-remaining" id="np-remaining"></span>
             <input type="range" class="progress-bar" id="progress-bar" min="0" max="100" value="0">
             <span class="np-time" id="np-duration">0:00</span>
           </div>
@@ -230,21 +272,31 @@
         <div class="np-overlay-header">
           <button class="icon-btn" id="np-back-btn" aria-label="Close">${icons.back}</button>
           <span class="np-overlay-title-text">Now Playing</span>
-          <button class="icon-btn" id="np-queue-btn" onclick="navigate('queue');hideNowPlaying()" aria-label="Queue">${icons.queue}</button>
+          <div style="display:flex;gap:4px">
+            <button class="icon-btn" id="np-pip-btn" aria-label="Picture in Picture" style="display:none">${icons.pip}</button>
+            <button class="icon-btn" id="np-queue-btn" aria-label="Queue">${icons.queue}</button>
+          </div>
         </div>
         <div class="np-overlay-body">
           <div class="np-overlay-artwork">
             <img id="np-overlay-cover" src="" alt="">
           </div>
+          <div class="np-overlay-queue" id="np-overlay-queue" style="display:none">
+            <div class="track-list" id="np-queue-tracks"></div>
+          </div>
           <div class="np-overlay-info">
             <div class="np-overlay-track" id="np-overlay-title">No track</div>
-            <div class="np-overlay-artist" id="np-overlay-artist"><a class="meta-link" id="np-overlay-artist-link"></a></div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px">
+              <div class="np-overlay-artist" id="np-overlay-artist"><a class="meta-link" id="np-overlay-artist-link"></a></div>
+              <button class="star-btn overlay-star" id="np-overlay-star" style="display:none" onclick="toggleStar(this)" title="Love"></button>
+            </div>
             <div class="np-overlay-album" id="np-overlay-album"><a class="meta-link" id="np-overlay-album-link"></a></div>
           </div>
           <div class="np-overlay-progress">
             <input type="range" class="progress-bar" id="np-overlay-progress" min="0" max="100" value="0">
             <div class="np-overlay-time-row">
               <span class="np-time" id="np-overlay-current">0:00</span>
+              <span class="np-time np-remaining" id="np-overlay-remaining"></span>
               <span class="np-time" id="np-overlay-duration">0:00</span>
             </div>
           </div>
@@ -316,7 +368,7 @@
     $('#sidebar').classList.remove('open')
     $('#sidebar-backdrop')?.classList.remove('show')
 
-    const titles = { home: 'Home', search: 'Search', albums: 'Library', artists: 'Artists', queue: 'Queue', playlists: 'Playlists', settings: 'Settings' }
+    const titles = { home: 'Home', search: 'Search', albums: 'Library', artists: 'Artists', queue: 'Queue', playlists: 'Playlists', settings: 'Settings', genres: 'Genres', 'genre-tracks': 'Genre' }
     const titleEl = $('#top-bar-title')
     if (titleEl && titles[view]) titleEl.textContent = titles[view]
 
@@ -328,6 +380,7 @@
       case 'settings': renderSettings(); break
       case 'queue': renderQueue(); break
       case 'playlists': renderPlaylists(); break
+      case 'genres': renderGenres(); break
     }
   }
 
@@ -390,6 +443,20 @@
     // Background image
     const bgImg = document.getElementById('np-overlay-bg-img')
     if (bgImg) bgImg.src = t.coverUrl || ''
+    // Overlay star
+    const overlayStar = document.getElementById('np-overlay-star')
+    if (overlayStar) {
+      if (t.id) {
+        overlayStar.style.display = ''
+        const starred = !!t.starred
+        overlayStar.dataset.id = t.id
+        overlayStar.dataset.starred = starred
+        overlayStar.classList.toggle('starred', starred)
+        overlayStar.innerHTML = icons[starred ? 'heartFilled' : 'heart']
+      } else {
+        overlayStar.style.display = 'none'
+      }
+    }
   }
 
   function showSnackbar(msg, type = 'success') {
@@ -424,13 +491,17 @@
     }
     el.innerHTML = '<div class="loading"><div class="loading-spinner"></div> Loading...</div>'
     try {
-      const [newestRes, recentRes, artistsRes] = await Promise.all([
+      const [newestRes, recentRes, randomRes, frequentRes, artistsRes] = await Promise.all([
         navidrome.getAlbumList2('newest', 24).catch(() => null),
         navidrome.getAlbumList2('recent', 12).catch(() => null),
+        navidrome.getAlbumList2('random', 12).catch(() => null),
+        navidrome.getAlbumList2('frequent', 12).catch(() => null),
         navidrome.getArtists().catch(() => null)
       ])
       const newest = newestRes?.albumList2?.album || []
       const recent = recentRes?.albumList2?.album || []
+      const random = randomRes?.albumList2?.album || []
+      const frequent = frequentRes?.albumList2?.album || []
       const artistIndex = artistsRes?.artists?.index || []
       const artistCount = artistIndex.reduce((sum, i) => sum + (i.artist?.length || 0), 0)
       const albumCount = artistIndex.reduce((sum, i) => sum + (i.artist || []).reduce((s, a) => s + (a.albumCount || 0), 0), 0)
@@ -447,11 +518,19 @@
       }
 
       if (newest.length) {
-        html += `<h3 class="section-title">New Releases</h3><div class="album-grid">${newest.map(a => albumCard(a)).join('')}</div>`
+        html += `<h3 class="section-title">New Releases</h3><div class="album-grid section-scroll">${newest.map(a => albumCard(a)).join('')}</div>`
       }
 
       if (recent.length) {
-        html += `<h3 class="section-title">Recently Played</h3><div class="album-grid">${recent.map(a => albumCard(a)).join('')}</div>`
+        html += `<h3 class="section-title">Recently Played</h3><div class="album-grid section-scroll">${recent.map(a => albumCard(a)).join('')}</div>`
+      }
+
+      if (frequent.length) {
+        html += `<h3 class="section-title">Most Played</h3><div class="album-grid section-scroll">${frequent.map(a => albumCard(a)).join('')}</div>`
+      }
+
+      if (random.length) {
+        html += `<h3 class="section-title">Random Albums</h3><div class="album-grid section-scroll">${random.map(a => albumCard(a)).join('')}</div>`
       }
 
       if (!newest.length && !recent.length) {
@@ -459,6 +538,63 @@
       }
 
       el.innerHTML = html
+    } catch (e) {
+      el.innerHTML = `<div class="error-msg">${e.message}</div>`
+    }
+  }
+
+  async function renderGenres() {
+    const el = $('#view-genres')
+    el.innerHTML = '<div class="loading"><div class="loading-spinner"></div> Loading...</div>'
+    try {
+      const resp = await navidrome.getGenres()
+      const genres = resp?.subsonicResponse?.genres?.genre || []
+      _allGenres = genres
+      if (!genres.length) { el.innerHTML = '<div class="empty-state">No genres available</div>'; return }
+      el.innerHTML = `
+        <h3 class="section-title">Genres</h3>
+        <div class="genre-grid">${genres.map(g => `
+          <div class="genre-chip" onclick="showGenreTracks('${escHtml(g.name || '').replace(/'/g, "\\'")}')">
+            <span class="genre-name">${escHtml(g.name || 'Unknown')}</span>
+            <span class="genre-count">${g.songCount || 0} songs</span>
+          </div>
+        `).join('')}</div>
+      `
+    } catch (e) {
+      el.innerHTML = `<div class="error-msg">${e.message}</div>`
+    }
+  }
+
+  window.showGenreTracks = async function (genre) {
+    navigate('genre-tracks')
+    const el = $('#view-genre-tracks')
+    el.innerHTML = `<div class="loading"><div class="loading-spinner"></div> Loading...</div>`
+    try {
+      const resp = await navidrome.getSongsByGenre(genre, 200)
+      const songs = resp?.subsonicResponse?.randomSongs?.song || []
+      if (!songs.length) { el.innerHTML = '<div class="empty-state">No songs found in this genre</div>'; return }
+      const tracks = songs.map(s => ({
+        ...s, streamUrl: navidrome.streamUrl(s.id),
+        coverUrl: navidrome.coverUrl(s.id, 100),
+        albumName: s.album || '', albumArtist: s.artist || ''
+      }))
+      window._libraryTracks = tracks
+      el.innerHTML = `
+        <div class="library-header">
+          <h3 class="section-title">${escHtml(genre)}</h3>
+          <button class="btn btn-sm" onclick="navigate('genres')">${icons.back} Back</button>
+        </div>
+        <div class="track-list">${tracks.map((t, i) => `
+          <div class="track-row" onclick="playLibraryTrack(${i})"${_ctxAttr(t)}>
+            <span class="track-num">${i + 1}</span>
+            <div class="track-info">
+              <div class="track-name">${escHtml(t.title)}</div>
+              <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist(null,'${escHtml(t.artist || '').replace(/'/g, "\\'")}')">${escHtml(t.artist || '')}</a> · <a class="meta-link" onclick="event.stopPropagation();showAlbum(null,'${escHtml(t.album || '').replace(/'/g, "\\'")}','${escHtml(t.artist || '').replace(/'/g, "\\'")}')">${escHtml(t.album || '')}</a></div>
+            </div>
+            ${_starBtnHtml(t.id, !!t.starred)}
+            <span class="track-duration">${player.formatTime(t.duration)}</span>
+          </div>`).join('')}</div>
+      `
     } catch (e) {
       el.innerHTML = `<div class="error-msg">${e.message}</div>`
     }
@@ -476,7 +612,15 @@
           <button class="library-tab ${libraryState.tab === 'artists' ? 'active' : ''}" data-libtab="artists">Artists</button>
           <button class="library-tab ${libraryState.tab === 'tracks' ? 'active' : ''}" data-libtab="tracks">Tracks</button>
         </div>
-        <input type="text" class="input library-search" id="library-search" placeholder="Filter library..." autocomplete="off">
+        <div class="library-controls">
+          <input type="text" class="input library-search" id="library-search" placeholder="Filter library..." autocomplete="off">
+          <select class="input library-sort" id="library-sort">
+            <option value="name" ${libraryState.sortBy === 'name' ? 'selected' : ''}>Name</option>
+            <option value="artist" ${libraryState.sortBy === 'artist' ? 'selected' : ''}>Artist</option>
+            <option value="year" ${libraryState.sortBy === 'year' ? 'selected' : ''}>Year</option>
+            <option value="recent" ${libraryState.sortBy === 'recent' ? 'selected' : ''}>Recently Added</option>
+          </select>
+        </div>
       </div>
       <div class="library-content" id="library-content">
         <div class="loading"><div class="loading-spinner"></div> Loading...</div>
@@ -485,6 +629,7 @@
 
     bindLibraryTabs()
     bindLibrarySearch()
+    bindLibrarySort()
     loadLibraryTab()
   }
 
@@ -508,6 +653,15 @@
         libraryState.search = input.value
         renderLibraryContent()
       }, 200)
+    })
+  }
+
+  function bindLibrarySort() {
+    const sel = $('#library-sort')
+    if (!sel) return
+    sel.addEventListener('change', () => {
+      libraryState.sortBy = sel.value
+      renderLibraryContent()
     })
   }
 
@@ -601,6 +755,16 @@
       return
     }
 
+    const sortBy = libraryState.sortBy
+    if (sortBy && sortBy !== 'name') {
+      items = [...items].sort((a, b) => {
+        if (sortBy === 'artist') return (a.artist || '').localeCompare(b.artist || '')
+        if (sortBy === 'year') return (a.year || 0) - (b.year || 0)
+        if (sortBy === 'recent') return new Date(b.updated || b.created || 0) - new Date(a.updated || a.created || 0)
+        return 0
+      })
+    }
+
     window._libItems = items
     window._libPage = 0
     _renderLibraryPage()
@@ -635,12 +799,13 @@
       case 'tracks':
         content.innerHTML = `
           <div class="track-list">${slice.map((t, i) => `
-            <div class="track-row" onclick="playLibraryTrack(${i})">
+            <div class="track-row" onclick="playLibraryTrack(${i})"${_ctxAttr(t)}>
               <span class="track-num">${i + 1}</span>
               <div class="track-info">
                 <div class="track-name">${escHtml(t.title)}</div>
                 <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist(null,'${escHtml(t.artist || '').replace(/'/g, "\\'")}')">${escHtml(t.artist || '')}</a> · <a class="meta-link" onclick="event.stopPropagation();showAlbum(null,'${escHtml(t.album || '').replace(/'/g, "\\'")}','${escHtml(t.artist || '').replace(/'/g, "\\'")}')">${escHtml(t.album || '')}</a></div>
               </div>
+              ${_starBtnHtml(t.id, !!t.starred)}
               <span class="track-duration">${player.formatTime(t.duration)}</span>
             </div>
           `).join('')}</div>`
@@ -985,6 +1150,25 @@
     return `<div class="skel-grid">${Array(n).fill('<div class="skel-card"><div class="skel-img"></div><div class="skel-line"></div><div class="skel-line-sm"></div></div>').join('')}</div>`
   }
 
+  function _starBtnHtml(songId, starred) {
+    const filled = starred ? 'heartFilled' : 'heart'
+    return `<button class="star-btn${starred ? ' starred' : ''}" data-starred="${!!starred}" data-id="${escHtml(songId)}" onclick="event.stopPropagation();toggleStar(this)" title="Love">${icons[filled]}</button>`
+  }
+
+  window.toggleStar = function(btn) {
+    const id = btn.dataset.id
+    const was = btn.dataset.starred === 'true'
+    const next = !was
+    if (next) {
+      navidrome.star(id).catch(() => {})
+    } else {
+      navidrome.unstar(id).catch(() => {})
+    }
+    btn.dataset.starred = next
+    btn.classList.toggle('starred', next)
+    btn.innerHTML = icons[next ? 'heartFilled' : 'heart']
+  }
+
   async function showAlbum(id, albumName, artistName) {
     albumHistoryView = currentView
     const el = $('#view-albums')
@@ -1049,12 +1233,13 @@
     }
 
     const tracksHtml = songs.map((s, i) => `
-      <div class="track-row" onclick="playTrackFromAlbum(${i})" data-index="${i}">
+      <div class="track-row" onclick="playTrackFromAlbum(${i})"${_ctxAttr(s)}>
         <span class="track-num">${s.track || i + 1}</span>
         <div class="track-info">
           <div class="track-name">${escHtml(s.title)}</div>
           <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist('${escHtml(s.artistId || '')}','${escHtml(s.artist || album.artist || '').replace(/'/g, "\\'")}')">${escHtml(s.artist || album.artist || '')}</a></div>
         </div>
+        ${_starBtnHtml(s.id, !!s.starred)}
         <span class="track-duration">${player.formatTime(s.duration)}</span>
       </div>
     `).join('')
@@ -1267,6 +1452,183 @@
     if (modal) modal.classList.remove('bio-modal--open')
   }
 
+  /* === Context Menu === */
+  let _ctxTrack = null
+
+  window.openContextMenu = function (track, event) {
+    event?.stopPropagation()
+    _ctxTrack = track
+    const menu = $('#context-menu')
+    const content = menu?.querySelector('.context-menu-content')
+    if (!content) return
+    content.innerHTML = `
+      <div class="ctx-item" data-action="play-next"><span class="ctx-icon">${icons.next}</span> Play Next</div>
+      <div class="ctx-item" data-action="add-queue"><span class="ctx-icon">${icons.queue}</span> Add to Queue</div>
+      <div class="ctx-item" data-action="add-playlist"><span class="ctx-icon">${icons.playlist}</span> Add to Playlist</div>
+      <div class="ctx-divider"></div>
+      <div class="ctx-item" data-action="go-artist"><span class="ctx-icon">${icons.library}</span> Go to Artist</div>
+      <div class="ctx-item" data-action="go-album"><span class="ctx-icon">${icons.library}</span> Go to Album</div>
+      <div class="ctx-divider"></div>
+      <div class="ctx-item" data-action="star"><span class="ctx-icon">${icons.heart}</span> ${track.starred ? 'Unstar' : 'Star'}</div>
+    `
+    content.querySelectorAll('.ctx-item').forEach(item => {
+      item.addEventListener('click', () => {
+        closeContextMenu()
+        handleCtxAction(item.dataset.action)
+      })
+    })
+    // Position near the touch point
+    menu.classList.remove('hidden')
+    menu.classList.add('ctx-open')
+    const rect = content.getBoundingClientRect()
+    const x = event?.clientX != null ? event.clientX : window.innerWidth / 2
+    const y = event?.clientY != null ? event.clientY : window.innerHeight / 2
+    let left = x - 10
+    let top = y - 10
+    if (left + rect.width > window.innerWidth - 10) left = window.innerWidth - rect.width - 10
+    if (top + rect.height > window.innerHeight - 10) top = window.innerHeight - rect.height - 10
+    if (left < 10) left = 10
+    if (top < 10) top = 10
+    content.style.left = left + 'px'
+    content.style.top = top + 'px'
+  }
+
+  function closeContextMenu() {
+    const menu = $('#context-menu')
+    if (menu) {
+      menu.classList.add('hidden')
+      menu.classList.remove('ctx-open')
+    }
+    _ctxTrack = null
+  }
+  window.closeContextMenu = closeContextMenu
+
+  function handleCtxAction(action) {
+    const t = _ctxTrack
+    if (!t) return
+    const track = {
+      id: t.id, title: t.title || t.name, artist: t.artist || '',
+      album: t.album || t.albumName, duration: t.duration, coverUrl: t.coverUrl || '',
+      streamUrl: t.streamUrl || navidrome.streamUrl(t.id)
+    }
+    switch (action) {
+      case 'play-next':
+        player.playNext(track)
+        showSnackbar('Will play next')
+        break
+      case 'add-queue':
+        player.addToQueue(track)
+        showSnackbar('Added to queue')
+        break
+      case 'add-playlist':
+        showAddToPlaylistPicker(t)
+        break
+      case 'go-artist':
+        if (t.artist || t.albumArtist) showArtist(null, t.artist || t.albumArtist)
+        break
+      case 'go-album':
+        if (t.album || t.albumName) showAlbum(null, t.album || t.albumName, t.artist || t.albumArtist || '')
+        break
+      case 'star': {
+        const btn = document.querySelector(`.star-btn[data-id="${t.id}"]`)
+        if (btn) toggleStar(btn)
+        else {
+          toggleStarById(t.id)
+          showSnackbar(t.starred ? 'Unstarred' : 'Starred')
+        }
+        break
+      }
+    }
+  }
+
+  window.toggleStarById = async function (id) {
+    if (!id) return
+    try {
+      const allStarBtns = document.querySelectorAll(`.star-btn[data-id="${id}"]`)
+      const isStarred = allStarBtns.length > 0 && allStarBtns[0].dataset.starred === 'true'
+      await navidrome[isStarred ? 'unstar' : 'star'](id)
+      allStarBtns.forEach(btn => {
+        btn.dataset.starred = !isStarred
+        btn.classList.toggle('starred', !isStarred)
+        btn.innerHTML = icons[!isStarred ? 'heartFilled' : 'heart']
+      })
+    } catch (e) {
+      showError(e.message)
+    }
+  }
+
+  async function showAddToPlaylistPicker(track) {
+    const existing = document.getElementById('pl-picker-overlay')
+    if (existing) existing.remove()
+
+    const overlay = document.createElement('div')
+    overlay.id = 'pl-picker-overlay'
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center'
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove() })
+
+    const box = document.createElement('div')
+    box.style.cssText = 'background:var(--bg2);border-radius:12px;padding:16px;max-width:320px;width:90%;max-height:60vh;overflow-y:auto'
+
+    box.innerHTML = `<h4 style="margin:0 0 8px">Add to Playlist</h4><div id="pl-picker-list"></div>`
+    overlay.appendChild(box)
+    document.body.appendChild(overlay)
+
+    const list = document.getElementById('pl-picker-list')
+    list.innerHTML = '<div style="color:var(--text3)">Loading...</div>'
+    try {
+      const resp = await navidrome.getPlaylists()
+      const playlists = resp?.playlists?.playlist || []
+      if (!playlists.length) {
+        list.innerHTML = '<div style="color:var(--text3);padding:8px 0">No playlists. Create one first.</div>'
+        return
+      }
+      list.innerHTML = ''
+      playlists.forEach(pl => {
+        const row = document.createElement('div')
+        row.style.cssText = 'display:flex;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer'
+        row.innerHTML = `<span style="flex:1">${escHtml(pl.name)}</span><span style="color:var(--text3);font-size:0.8rem">${pl.songCount || 0}</span>`
+        row.addEventListener('click', async () => {
+          try {
+            await navidrome.updatePlaylist(pl.id, { songIdsToAdd: [track.id] })
+            showSuccess(`Added to "${pl.name}"`)
+            overlay.remove()
+          } catch (e) {
+            showError(e.message)
+          }
+        })
+        list.appendChild(row)
+      })
+    } catch (e) {
+      list.innerHTML = `<div style="color:var(--red)">${e.message}</div>`
+    }
+  }
+
+  /* === Long-press context menu delegation === */
+  let _lpTimer = null, _lpTarget = null
+  document.addEventListener('touchstart', e => {
+    const row = e.target.closest('[data-ctx]')
+    if (!row) return
+    _lpTarget = row
+    _lpTimer = setTimeout(() => {
+      _lpTimer = null
+      try {
+        const track = JSON.parse(row.dataset.ctx)
+        openContextMenu(track, e)
+      } catch (_) {}
+    }, 500)
+  }, { passive: true })
+  document.addEventListener('touchmove', () => { clearTimeout(_lpTimer); _lpTimer = null }, { passive: true })
+  document.addEventListener('touchend', () => { clearTimeout(_lpTimer); _lpTimer = null }, { passive: true })
+  document.addEventListener('contextmenu', e => {
+    const row = e.target.closest('[data-ctx]')
+    if (!row) return
+    e.preventDefault()
+    try {
+      const track = JSON.parse(row.dataset.ctx)
+      openContextMenu(track, e)
+    } catch (_) {}
+  })
+
   function searchDiscography(query) {
     navigate('search')
     const input = document.getElementById('search-input')
@@ -1284,6 +1646,13 @@
     return d.innerHTML
   }
 
+  function _ctxAttr(t) {
+    const o = { id: t.id, title: t.title || t.name, artist: t.artist || t.albumArtist || '',
+      album: t.album || t.albumName || '', duration: t.duration, coverUrl: t.coverUrl || '',
+      streamUrl: t.streamUrl || '', starred: !!t.starred }
+    return ` data-ctx='${JSON.stringify(o).replace(/'/g, '&#39;').replace(/"/g, '&quot;')}' `
+  }
+
   function bindSettings() {
     document.addEventListener('click', e => {
       if (e.target.closest('#settings-save')) saveSettings()
@@ -1294,32 +1663,156 @@
 
   function renderSettings() {
     const s = settings.load()
+    const activeTab = s._settingsTab || 'servers'
     $('#view-settings').innerHTML = `
       <h2 class="view-title">Settings</h2>
-      <form id="settings-form" class="settings-form" onsubmit="return false">
-        <section class="settings-section">
-          <h3>Navidrome</h3>
-          <p class="settings-desc">Your music library server (Subsonic API)</p>
-          <label>Server URL <input type="url" class="input" id="s-nav-server" value="${escHtml(s.navidrome_server)}" placeholder="https://music.example.com"></label>
-          <label>Username <input type="text" class="input" id="s-nav-user" value="${escHtml(s.navidrome_username)}"></label>
-          <label>Password <input type="password" class="input" id="s-nav-pass" value="${escHtml(s.navidrome_password)}"></label>
-          <button type="button" class="btn btn-secondary" id="settings-test-navidrome" style="margin-top:8px">Test Connection</button>
-        </section>
-        <section class="settings-section">
-          <h3>SoulSync</h3>
-          <p class="settings-desc">Music discovery and download server</p>
-          <label>Server URL <input type="url" class="input" id="s-ss-server" value="${escHtml(s.soulsync_server)}" placeholder="https://soulsync.example.com"></label>
-          <label>API Key <input type="password" class="input" id="s-ss-key" value="${escHtml(s.soulsync_apikey)}" placeholder="sk_..."></label>
-          <button type="button" class="btn btn-secondary" id="settings-test-soulsync" style="margin-top:8px">Test Connection</button>
-        </section>
-        <button type="button" class="btn btn-primary" id="settings-save">Save Settings</button>
-      </form>
-      <div class="settings-section" id="settings-wishlist-section">
-        <h3>Wishlist <span class="wishlist-count" id="sw-count"></span></h3>
-        <div id="settings-wishlist-content"></div>
+      <div class="settings-tabs">
+        <button class="settings-tab ${activeTab === 'servers' ? 'active' : ''}" data-stab="servers">Servers</button>
+        <button class="settings-tab ${activeTab === 'playback' ? 'active' : ''}" data-stab="playback">Playback</button>
+        <button class="settings-tab ${activeTab === 'equalizer' ? 'active' : ''}" data-stab="equalizer">Equalizer</button>
+        <button class="settings-tab ${activeTab === 'wishlist' ? 'active' : ''}" data-stab="wishlist">Wishlist</button>
       </div>
+      <div class="settings-tab-content" id="settings-tab-content"></div>
     `
-    loadWishlistInSettings()
+    $$('.settings-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        $$('.settings-tab').forEach(t => t.classList.remove('active'))
+        tab.classList.add('active')
+        const tabName = tab.dataset.stab
+        settings.save({ _settingsTab: tabName })
+        renderSettingsTab(tabName)
+      })
+    })
+    renderSettingsTab(activeTab)
+  }
+
+  function renderSettingsTab(tab) {
+    const el = $('#settings-tab-content')
+    const s = settings.load()
+    switch (tab) {
+      case 'servers': {
+        el.innerHTML = `
+          <form id="settings-form" class="settings-form" onsubmit="return false">
+            <section class="settings-section">
+              <h3>Navidrome</h3>
+              <p class="settings-desc">Your music library server (Subsonic API)</p>
+              <label>Server URL <input type="url" class="input" id="s-nav-server" value="${escHtml(s.navidrome_server)}" placeholder="https://music.example.com"></label>
+              <label>Username <input type="text" class="input" id="s-nav-user" value="${escHtml(s.navidrome_username)}"></label>
+              <label>Password <input type="password" class="input" id="s-nav-pass" value="${escHtml(s.navidrome_password)}"></label>
+              <button type="button" class="btn btn-secondary" id="settings-test-navidrome" style="margin-top:8px">Test Connection</button>
+            </section>
+            <section class="settings-section">
+              <h3>SoulSync</h3>
+              <p class="settings-desc">Music discovery and download server</p>
+              <label>Server URL <input type="url" class="input" id="s-ss-server" value="${escHtml(s.soulsync_server)}" placeholder="https://soulsync.example.com"></label>
+              <label>API Key <input type="password" class="input" id="s-ss-key" value="${escHtml(s.soulsync_apikey)}" placeholder="sk_..."></label>
+              <button type="button" class="btn btn-secondary" id="settings-test-soulsync" style="margin-top:8px">Test Connection</button>
+            </section>
+            <button type="button" class="btn btn-primary" id="settings-save">Save Settings</button>
+          </form>
+        `
+        break
+      }
+      case 'playback': {
+        el.innerHTML = `
+          <form id="settings-form" class="settings-form" onsubmit="return false">
+            <section class="settings-section">
+              <h3>Playback</h3>
+              <label>Crossfade
+                <input type="range" id="s-crossfade" min="0" max="10" step="0.5" value="${s.crossfade || 0}" style="width:120px;vertical-align:middle">
+                <span id="s-crossfade-val">${(s.crossfade || 0)}s</span>
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" id="s-gapless" ${s.gapless !== false ? 'checked' : ''}>
+                Gapless playback
+              </label>
+            </section>
+            <button type="button" class="btn btn-primary" id="settings-save">Save Settings</button>
+          </form>
+        `
+        const cf = $('#s-crossfade')
+        cf?.addEventListener('input', () => {
+          const val = document.getElementById('s-crossfade-val')
+          if (val) val.textContent = cf.value + 's'
+        })
+        break
+      }
+      case 'equalizer': {
+        const bands = ['60Hz', '170Hz', '310Hz', '600Hz', '1kHz', '3kHz', '6kHz', '12kHz', '14kHz', '16kHz']
+        const eqPresets = {
+          flat: bands.map(() => 0),
+          rock: [5, 4, 3, 2, 1, 2, 3, 4, 3, 2],
+          pop: [-1, 3, 4, 5, 3, 1, 0, 0, 0, 0],
+          jazz: [3, 3, 2, 2, 1, 1, 2, 3, 4, 5],
+          classical: [5, 4, 3, 2, 1, 1, 2, 3, 4, 5],
+          bass: [7, 6, 4, 2, 0, -1, -2, -3, -4, -5],
+          vocals: [-1, -1, 0, 2, 4, 4, 3, 2, 1, 1]
+        }
+        const eqVals = s.equalizer || bands.map(() => 0)
+        const eqPresetName = s.eqPreset || 'custom'
+        el.innerHTML = `
+          <form id="settings-form" class="settings-form" onsubmit="return false">
+            <section class="settings-section">
+              <h3>Equalizer</h3>
+              <p class="settings-desc">Tone adjustment (±12dB)</p>
+              <label class="checkbox-row">
+                <input type="checkbox" id="s-eq-enabled" ${s.eqEnabled ? 'checked' : ''}>
+                Enable Equalizer
+              </label>
+              <div class="eq-presets">
+                <label>Preset</label>
+                <select id="s-eq-preset" class="input" style="width:auto">
+                  ${Object.keys(eqPresets).map(name => `<option value="${name}" ${eqPresetName === name ? 'selected' : ''}>${name.charAt(0).toUpperCase() + name.slice(1)}</option>`).join('')}
+                  <option value="custom" ${eqPresetName === 'custom' ? 'selected' : ''}>Custom</option>
+                </select>
+              </div>
+              <div class="eq-bands" id="eq-bands">
+                ${bands.map((band, i) => `
+                  <div class="eq-band">
+                    <span class="eq-label">${band}</span>
+                    <input type="range" class="eq-slider" data-idx="${i}" min="-12" max="12" step="1" value="${eqVals[i] || 0}" orient="vertical">
+                    <span class="eq-value">${eqVals[i] || 0}dB</span>
+                  </div>
+                `).join('')}
+              </div>
+            </section>
+            <button type="button" class="btn btn-primary" id="settings-save">Save Settings</button>
+          </form>
+        `
+        const eqPresetEl = $('#s-eq-preset')
+        eqPresetEl?.addEventListener('change', () => {
+          const preset = eqPresets[eqPresetEl.value]
+          if (!preset) return
+          $$('.eq-slider').forEach((sl, i) => {
+            if (preset[i] != null) {
+              sl.value = preset[i]
+              const valEl = sl.parentNode.querySelector('.eq-value')
+              if (valEl) valEl.textContent = preset[i] + 'dB'
+            }
+          })
+          if ($('#s-eq-enabled')?.checked) applyEq()
+        })
+        $$('.eq-slider').forEach(slider => {
+          slider.addEventListener('input', () => {
+            const valEl = slider.parentNode.querySelector('.eq-value')
+            if (valEl) valEl.textContent = slider.value + 'dB'
+            if (eqPresetEl) eqPresetEl.value = 'custom'
+            if ($('#s-eq-enabled')?.checked) applyEq()
+          })
+        })
+        break
+      }
+      case 'wishlist': {
+        el.innerHTML = `
+          <section class="settings-section" id="settings-wishlist-section">
+            <h3>Wishlist <span class="wishlist-count" id="sw-count"></span></h3>
+            <div id="settings-wishlist-content"></div>
+          </section>
+        `
+        setTimeout(() => loadWishlistInSettings(), 0)
+        break
+      }
+    }
   }
 
   function saveSettings() {
@@ -1328,7 +1821,15 @@
       navidrome_username: $('#s-nav-user')?.value || '',
       navidrome_password: $('#s-nav-pass')?.value || '',
       soulsync_server: $('#s-ss-server')?.value || '',
-      soulsync_apikey: $('#s-ss-key')?.value || ''
+      soulsync_apikey: $('#s-ss-key')?.value || '',
+      crossfade: $('#s-crossfade')?.value || '0',
+      gapless: $('#s-gapless')?.checked !== false,
+      eqEnabled: $('#s-eq-enabled')?.checked || false,
+      eqPreset: $('#s-eq-preset')?.value || 'custom'
+    }
+    const eqSliders = $$('.eq-slider')
+    if (eqSliders.length) {
+      s.equalizer = eqSliders.map(sl => parseFloat(sl.value) || 0)
     }
     settings.save(s)
     Object.assign(navidrome, {
@@ -1344,9 +1845,26 @@
       apiKey: s.soulsync_apikey,
       proxyUrl: s.soulsync_proxy || 'http://localhost:8080'
     })
+    player.setCrossfade(parseFloat(s.crossfade) || 0)
+    player.setGapless(s.gapless !== false)
+    if (s.eqEnabled) applyEq()
+    else disableEq()
     updateSidebarStatus()
     showSuccess('Settings saved')
   }
+
+  function applyEq() {
+    const sliders = $$('.eq-slider')
+    if (!sliders.length) return
+    const gains = sliders.map(sl => parseFloat(sl.value) || 0)
+    player.setEq(gains)
+  }
+  window.applyEq = applyEq
+
+  function disableEq() {
+    player.disableEq()
+  }
+  window.disableEq = disableEq
 
   async function testNavidrome() {
     const btn = $('#settings-test-navidrome')
@@ -1482,6 +2000,15 @@
     const navCount = navSongs.length + navAlbums.length + navArtists.length
     const ssCount = ssTracks.length + ssAlbums.length + ssArtists.length
 
+    // Build dedup set from Navidrome results
+    const _navTrackKeys = new Set(navSongs.map(s => _trackKey(s.title || '', s.artist || '')))
+    const _navAlbumKeys = new Set(navAlbums.map(a => _albumKey(a.name || '', a.artist || '')))
+    const _navArtistNames = new Set(navArtists.map(a => a.name?.toLowerCase()))
+
+    function _trackKey(title, artist) { return (title + '|' + artist).toLowerCase().replace(/\s+/g, ' ') }
+    function _albumKey(name, artist) { return (name + '|' + artist).toLowerCase().replace(/\s+/g, ' ') }
+    function _inLibrary(name, artist) { return _navArtistNames.has(name?.toLowerCase()) }
+
     if (navCount === 0 && ssCount === 0) {
       el.innerHTML = `<div class="search-none">No results found for "${escHtml(query)}"</div>`
       return
@@ -1532,12 +2059,13 @@
         window._searchSongs = songsWithStream
         navSongs.forEach((s, i) => {
           html += `
-            <div class="track-row" onclick="playSearchSong(${i})">
+            <div class="track-row" onclick="playSearchSong(${i})"${_ctxAttr(s)}>
               <span class="track-num">${s.track || i + 1}</span>
               <div class="track-info">
                 <div class="track-name">${escHtml(s.title)}</div>
                 <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist(null,'${escHtml(s.artist || '').replace(/'/g, "\\'")}')">${escHtml(s.artist || '')}</a> · <a class="meta-link" onclick="event.stopPropagation();showAlbum(null,'${escHtml(s.album || '').replace(/'/g, "\\'")}','${escHtml(s.artist || '').replace(/'/g, "\\'")}')">${escHtml(s.album || '')}</a></div>
               </div>
+              ${_starBtnHtml(s.id, !!s.starred)}
               <span class="track-duration">${player.formatTime(s.duration)}</span>
             </div>`
         })
@@ -1579,6 +2107,7 @@
           const year = a.release_date?.substring(0, 4) || ''
           const img = a.image_url || a.images?.[0]?.url || ''
           const initial = (a.name || '?').charAt(0).toUpperCase()
+          const inLib = _navAlbumKeys.has(_albumKey(a.name || '', a.artists?.join(', ') || ''))
           html += `<div class="search-item search-item-clickable" onclick="showSsAlbum(${dataIdx})">
             <div class="search-thumb-wrap">${
               img
@@ -1589,7 +2118,7 @@
               <strong>${escHtml(a.name)}</strong>
               <span class="search-item-meta">· ${escHtml(a.artists?.join(', ') || '')}${year ? ` · ${year}` : ''}</span>
             </div>
-            <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();addSsAlbumToWishlist(${dataIdx}, this)" style="margin-left:auto">+ Wishlist</button>
+            ${inLib ? '<span class="badge badge-library" style="margin-left:auto">In Library</span>' : `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();addSsAlbumToWishlist(${dataIdx}, this)" style="margin-left:auto">+ Wishlist</button>`}
           </div>`
         })
         html += `</div>`
@@ -1604,6 +2133,7 @@
           window._ssData.push(data)
           const img = t.image_url || t.images?.[0]?.url || ''
           const initial = (t.name || '?').charAt(0).toUpperCase()
+          const inLib = _navTrackKeys.has(_trackKey(t.name || '', (t.artists?.join(', ') || t.artist || '')))
           html += `<div class="search-item">
             <div class="search-thumb-wrap">${
               img
@@ -1614,7 +2144,7 @@
               <strong>${escHtml(t.name || '')}</strong>
               <span class="search-item-meta">· <a class="meta-link" onclick="event.stopPropagation();showSsArtistByName('${escHtml((t.artists?.[0] || t.artist || '')).replace(/'/g, "\\'")}')">${escHtml(t.artists?.join(', ') || t.artist || '')}</a> · ${escHtml(t.album || '')}</span>
             </div>
-            <button class="btn btn-sm btn-secondary ss-wishlist-btn" data-idx="${dataIdx}" style="margin-left:auto">+ Wishlist</button>
+            ${inLib ? '<span class="badge badge-library" style="margin-left:auto">In Library</span>' : `<button class="btn btn-sm btn-secondary ss-wishlist-btn" data-idx="${dataIdx}" style="margin-left:auto">+ Wishlist</button>`}
           </div>`
         })
         html += `</div>`
@@ -2045,25 +2575,65 @@
         <h2 class="view-title" style="margin-bottom:0">Queue (${state.queue.length})</h2>
         <button class="btn btn-sm btn-danger" onclick="clearQueue()">${icons.delete} Clear</button>
       </div>
-      <div class="track-list">
+      <div class="track-list queue-track-list">
     `
-    state.queue.forEach((track, i) => {
-      const isCurrent = i === state.currentIndex
-      const artistText = escHtml(track.artist || track.artist_name || track.albumArtist || '').replace(/'/g, "\\'")
-      const albumText = escHtml(track.albumName || track.album || '').replace(/'/g, "\\'")
-      html += `
-        <div class="track-row ${isCurrent ? 'track-active' : ''}" onclick="jumpToQueueIndex(${i})">
-          <span class="track-num">${isCurrent ? icons.play : (i + 1)}</span>
-          <div class="track-info">
-            <div class="track-name">${escHtml(track.title || track.name || 'Unknown')}</div>
-            <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist(null,'${artistText}')">${escHtml(track.artist || track.artist_name || track.albumArtist || '')}</a></div>
+      state.queue.forEach((track, i) => {
+        const isCurrent = i === state.currentIndex
+        const artistText = escHtml(track.artist || track.artist_name || track.albumArtist || '').replace(/'/g, "\\'")
+        const albumText = escHtml(track.albumName || track.album || '').replace(/'/g, "\\'")
+        html += `
+          <div class="track-row ${isCurrent ? 'track-active' : ''}" onclick="jumpToQueueIndex(${i})" draggable="true" data-queue-idx="${i}"${_ctxAttr(track)}>
+            <span class="track-num drag-handle">${isCurrent ? icons.play : (i + 1)}</span>
+            <div class="track-info">
+              <div class="track-name">${escHtml(track.title || track.name || 'Unknown')}</div>
+              <div class="track-artist"><a class="meta-link" onclick="event.stopPropagation();showArtist(null,'${artistText}')">${escHtml(track.artist || track.artist_name || track.albumArtist || '')}</a></div>
+            </div>
+            ${_starBtnHtml(track.id, !!track.starred)}
+            <button class="icon-btn" onclick="event.stopPropagation();removeFromQueue(${i})" title="Remove">${icons.close}</button>
           </div>
-          <button class="icon-btn" onclick="event.stopPropagation();removeFromQueue(${i})" title="Remove">${icons.close}</button>
-        </div>
-      `
-    })
+        `
+      })
     html += '</div>'
     el.innerHTML = html
+    _enableQueueDrag()
+  }
+
+  function _enableQueueDrag() {
+    const container = document.querySelector('.queue-track-list')
+    if (!container) return
+    let dragEl = null
+    container.addEventListener('dragstart', e => {
+      const row = e.target.closest('[draggable]')
+      if (!row) return
+      dragEl = row
+      row.classList.add('dragging')
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', row.dataset.queueIdx)
+    })
+    container.addEventListener('dragend', e => {
+      const row = e.target.closest('[draggable]')
+      if (row) row.classList.remove('dragging')
+    })
+    container.addEventListener('dragover', e => {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      const after = e.target.closest('.track-row:not(.dragging)')
+      if (!after || !dragEl) return
+      const rect = after.getBoundingClientRect()
+      const mid = rect.top + rect.height / 2
+      container.insertBefore(dragEl, e.clientY < mid ? after : after.nextElementSibling)
+    })
+    container.addEventListener('drop', e => {
+      e.preventDefault()
+      if (!dragEl) return
+      const fromIdx = parseInt(dragEl.dataset.queueIdx)
+      const rows = [...container.querySelectorAll('.track-row')]
+      const toIdx = rows.indexOf(dragEl)
+      if (fromIdx !== toIdx) {
+        player.moveInQueue(fromIdx, toIdx)
+        renderQueue()
+      }
+    })
   }
 
   window.clearQueue = function () {
@@ -2079,6 +2649,32 @@
   window.removeFromQueue = function (i) {
     player.removeFromQueue(i)
     renderQueue()
+  }
+
+  window.addToQueue = function (dataIdx) {
+    const item = window._ssData?.[dataIdx]
+    if (!item) return
+    const t = item.raw
+    const track = {
+      id: t.id, title: t.name || t.title, artist: t.artists?.join(', ') || t.artist || '',
+      album: t.album, duration: t.duration, coverUrl: t.coverUrl || '',
+      streamUrl: navidrome.streamUrl(t.id)
+    }
+    player.addToQueue(track)
+    showSnackbar('Added to queue')
+  }
+
+  window.playNextTrack = function (dataIdx) {
+    const item = window._ssData?.[dataIdx]
+    if (!item) return
+    const t = item.raw
+    const track = {
+      id: t.id, title: t.name || t.title, artist: t.artists?.join(', ') || t.artist || '',
+      album: t.album, duration: t.duration, coverUrl: t.coverUrl || '',
+      streamUrl: navidrome.streamUrl(t.id)
+    }
+    player.playNext(track)
+    showSnackbar('Will play next')
   }
 
   /* ===== Playlists ===== */
@@ -2204,12 +2800,13 @@
 
       songs.forEach((s, i) => {
         html += `
-          <div class="track-row" onclick="playPlaylistTrack(${i})">
+          <div class="track-row" onclick="playPlaylistTrack(${i})"${_ctxAttr(s)}>
             <span class="track-num">${i + 1}</span>
             <div class="track-info">
               <div class="track-name">${escHtml(s.title)}</div>
               <div class="track-artist">${escHtml(s.artist || '')} · ${escHtml(s.album || '')}</div>
             </div>
+            ${_starBtnHtml(s.id, !!s.starred)}
             <button class="icon-btn" onclick="event.stopPropagation();removePlaylistTrack('${id}', '${escHtml(s.id)}', this)" title="Remove">${icons.close}</button>
           </div>`
       })
@@ -2451,9 +3048,11 @@
         try {
           await soulsync.downloadWishlist()
           showSuccess('Wishlist download started')
+          _startWishlistPolling()
         } catch (e) {
           if (e.message.includes('already processing')) {
             showError('Wishlist is already processing')
+            _startWishlistPolling()
           } else {
             showError(`Failed: ${e.message}`)
           }
@@ -2498,6 +3097,31 @@
 
   function renderWishlist() {
     loadWishlistInSettings()
+  }
+
+  let _wishlistPollTimer = null
+  function _startWishlistPolling() {
+    if (_wishlistPollTimer) return
+    _wishlistPollTimer = setInterval(async () => {
+      try {
+        const stats = await soulsync.getWishlistStats()
+        // Check if still processing
+        if (!stats?.is_auto_processing) {
+          clearInterval(_wishlistPollTimer)
+          _wishlistPollTimer = null
+          loadWishlistInSettings()
+          return
+        }
+        // Update wishlist UI if the settings wishlist tab is visible
+        if ($('#settings-wishlist-section')?.offsetParent) {
+          const countEl = $('#sw-count')
+          if (countEl && stats.total != null) countEl.textContent = stats.total
+        }
+      } catch (_) {
+        clearInterval(_wishlistPollTimer)
+        _wishlistPollTimer = null
+      }
+    }, 5000)
   }
 
   function bindPlayer() {
@@ -2551,11 +3175,106 @@
     progressBar?.addEventListener('mouseup', () => { scrubbing = false })
     progressBar?.addEventListener('touchend', () => { scrubbing = false })
 
+    const progressLine = document.querySelector('.np-progress-line')
+    progressLine?.addEventListener('click', e => {
+      if (!player.audio?.duration) return
+      const rect = progressLine.getBoundingClientRect()
+      const pct = (e.clientX - rect.left) / rect.width
+      player.audio.currentTime = pct * player.audio.duration
+    })
+
     volumeBar?.addEventListener('input', () => {
       player.setVolume(volumeBar.value)
     })
 
     $('#np-back-btn')?.addEventListener('click', hideNowPlaying)
+
+    $('#np-queue-btn')?.addEventListener('click', toggleOverlayQueue)
+
+    // PiP support
+    const pipBtn = $('#np-pip-btn')
+    if (pipBtn) {
+      if (document.pictureInPictureEnabled) {
+        pipBtn.style.display = ''
+        pipBtn.addEventListener('click', () => {
+          if (window.AndroidBridge && AndroidBridge.enterPip) {
+            AndroidBridge.enterPip()
+          }
+        })
+      }
+    }
+
+    function toggleOverlayQueue() {
+      const el = $('#np-overlay-queue')
+      if (!el) return
+      const shown = el.style.display !== 'none'
+      el.style.display = shown ? 'none' : ''
+      if (!shown) renderOverlayQueue()
+      $('#np-queue-btn')?.classList.toggle('active', !shown)
+    }
+
+    function renderOverlayQueue() {
+      const el = $('#np-queue-tracks')
+      if (!el) return
+      const state = player.getState()
+      if (!state.queue.length) {
+        el.innerHTML = '<div class="empty-state" style="padding:16px;font-size:0.82rem">Queue is empty</div>'
+        return
+      }
+      el.innerHTML = state.queue.map((track, i) => {
+        const isCurrent = i === state.currentIndex
+        return `
+          <div class="track-row ${isCurrent ? 'track-active' : ''}" onclick="jumpToQueueFromOverlay(${i})"${_ctxAttr(track)}>
+            <span class="track-num">${isCurrent ? icons.play : (i + 1)}</span>
+            <div class="track-info">
+              <div class="track-name">${escHtml(track.title || track.name || 'Unknown')}</div>
+              <div class="track-artist">${escHtml(track.artist || track.artist_name || track.albumArtist || '')}</div>
+            </div>
+            <button class="icon-btn" onclick="event.stopPropagation();removeFromOverlayQueue(${i})" title="Remove">${icons.close}</button>
+          </div>`
+      }).join('')
+    }
+
+    window.jumpToQueueFromOverlay = function (i) {
+      player.playQueue(player.queue, i)
+      renderOverlayQueue()
+      updateNowPlaying()
+    }
+
+    window.removeFromOverlayQueue = function (i) {
+      player.removeFromQueue(i)
+      renderOverlayQueue()
+    }
+
+    // Swipe down to dismiss overlay
+    const screen = $('#now-playing-screen')
+    let swipeStartY = 0, swiping = false
+    screen?.addEventListener('touchstart', e => {
+      if (e.target.closest('.np-overlay-controls') || e.target.closest('.progress-bar') || e.target.closest('.volume-bar')) return
+      swipeStartY = e.touches[0].clientY
+      swiping = false
+    }, { passive: true })
+    screen?.addEventListener('touchmove', e => {
+      const dy = e.touches[0].clientY - swipeStartY
+      if (dy > 10) swiping = true
+      if (swiping) {
+        screen.style.transition = 'none'
+        screen.style.transform = `translateY(${dy}px)`
+      }
+    }, { passive: true })
+    screen?.addEventListener('touchend', e => {
+      if (!swiping) return
+      const dy = parseFloat(screen.style.transform?.replace('translateY(','')?.replace('px)','') || '0')
+      screen.style.transition = ''
+      screen.style.transform = ''
+      if (dy > 100) hideNowPlaying()
+    }, { passive: true })
+
+    // Full-screen album art on tap
+    const artwork = $('#np-overlay-cover')
+    artwork?.addEventListener('click', () => {
+      screen?.classList.toggle('art-expanded')
+    })
 
     npOverlayPlay?.addEventListener('click', () => player.togglePlay())
     $('#np-ctrl-prev')?.addEventListener('click', () => player.prev())
@@ -2578,6 +3297,15 @@
       player.setVolume(npOverlayVolume.value)
     })
 
+    function _updateRemaining(current, duration) {
+      const rem = Math.max(0, duration - current)
+      const txt = rem > 0 ? '-' + player.formatTime(rem) : ''
+      const el1 = document.getElementById('np-remaining')
+      const el2 = document.getElementById('np-overlay-remaining')
+      if (el1) { el1.textContent = txt; el1.style.display = txt ? '' : 'none' }
+      if (el2) { el2.textContent = txt; el2.style.display = txt ? '' : 'none' }
+    }
+
     player.on('timeupdate', state => {
       const displayDur = state.duration || state.trackDuration || 0
       const pct = displayDur ? (state.currentTime / displayDur) * 100 : 0
@@ -2594,6 +3322,7 @@
       if (npOverlayDuration) npOverlayDuration.textContent = player.formatTime(displayDur)
       if (npOverlayProgress) npOverlayProgress.value = pct
       if (npOverlayVolume) npOverlayVolume.value = state.volume
+      _updateRemaining(state.currentTime, displayDur)
     })
 
     player.on('loaded', state => {
@@ -2622,10 +3351,26 @@
         if (state.duration && t.duration !== Math.round(state.duration)) {
           t.duration = Math.round(state.duration)
         }
+        // Bottom bar star
+        const barStar = document.getElementById('np-bar-star')
+        if (barStar && t.id) {
+          barStar.style.display = ''
+          barStar.dataset.id = t.id
+          const starred = !!t.starred
+          barStar.dataset.starred = starred
+          barStar.classList.toggle('starred', starred)
+          barStar.innerHTML = icons[starred ? 'heartFilled' : 'heart']
+        }
         // Background + color extraction
         const bgImg = document.getElementById('np-overlay-bg-img')
         if (bgImg) bgImg.src = coverSrc
         _extractColors(coverSrc)
+        // Remaining time
+        const remEl = document.getElementById('np-remaining')
+        const remOverlay = document.getElementById('np-overlay-remaining')
+        const remText = displayDur ? '-' + player.formatTime(displayDur) : ''
+        if (remEl) { remEl.textContent = remText; remEl.style.display = remText ? '' : 'none' }
+        if (remOverlay) { remOverlay.textContent = remText; remOverlay.style.display = remText ? '' : 'none' }
       }
     })
 

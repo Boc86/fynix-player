@@ -85,6 +85,8 @@ class AudioService : android.app.Service() {
 
     private lateinit var mediaSession: MediaSessionCompat
     private var noisyReceiver: BroadcastReceiver? = null
+    private var audioManager: AudioManager? = null
+    private var audioFocusListener: AudioManager.OnAudioFocusChangeListener? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -92,7 +94,32 @@ class AudioService : android.app.Service() {
         createChannel()
         setupMediaSession()
         registerNoisyReceiver()
+        setupAudioFocus()
         startForeground(NOTIFICATION_ID, buildNotification())
+    }
+
+    private fun setupAudioFocus() {
+        audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    dispatchAction(ACTION_PAUSE)
+                    audioManager?.abandonAudioFocus(audioFocusListener!!)
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    dispatchAction(ACTION_PAUSE)
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    // Duck: reduce volume — handled via WebView mediaSession ducking
+                    dispatchAction(ACTION_PAUSE)
+                }
+            }
+        }
+        audioManager?.requestAudioFocus(
+            audioFocusListener!!,
+            AudioManager.STREAM_MUSIC,
+            AudioManager.AUDIOFOCUS_GAIN
+        )
     }
 
     private fun createChannel() {

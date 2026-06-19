@@ -156,6 +156,44 @@ class NavidromeClient {
     if (songIdsToRemove?.length) params.songIdToRemove = songIdsToRemove
     return this._request('createPlaylist', params)
   }
+
+  async star(id, albumIds, artistIds) {
+    const params = {}
+    if (id) params.id = id
+    if (albumIds?.length) params.albumId = albumIds
+    if (artistIds?.length) params.artistId = artistIds
+    return this._request('star', params)
+  }
+
+  async unstar(id, albumIds, artistIds) {
+    const params = {}
+    if (id) params.id = id
+    if (albumIds?.length) params.albumId = albumIds
+    if (artistIds?.length) params.artistId = artistIds
+    return this._request('unstar', params)
+  }
+
+  async setRating(id, rating) {
+    return this._request('setRating', { id, rating: String(rating) })
+  }
+
+  async getGenres() {
+    return this._request('getGenres')
+  }
+
+  async getSongsByGenre(genre, count = 50, offset = 0) {
+    return this._request('getSongsByGenre', { genre, count: String(count), offset: String(offset) })
+  }
+
+  async getMusicFolders() {
+    return this._request('getMusicFolders')
+  }
+
+  async getIndexes(musicFolderId) {
+    const params = {}
+    if (musicFolderId) params.musicFolderId = musicFolderId
+    return this._request('getIndexes', params)
+  }
 }
 
 window.NavidromeClient = NavidromeClient

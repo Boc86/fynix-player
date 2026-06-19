@@ -1,10 +1,15 @@
 package com.fynix.player
 
 import android.Manifest
+import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -15,6 +20,10 @@ import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : AppCompatActivity() {
 
@@ -33,6 +42,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         mediaActionCallback = { action -> handleMediaAction(action) }
         playMediaCallback = { mediaId, parentType, parentId ->
             if (pageLoaded) {
@@ -47,6 +57,29 @@ class MainActivity : AppCompatActivity() {
         startLocalServer()
         setupWebView()
         queuePendingFromIntent(intent)
+    }
+
+    private fun enableEdgeToEdge() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    }
+
+    private fun getMonetAccentColor(): Int {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val resources = this.resources
+            val resId = resources.getIdentifier("system_accent1_600", "color", "android")
+            if (resId != 0) {
+                try { return resources.getColor(resId, theme) } catch (_: Exception) {}
+            }
+        }
+        // Fallback to orange
+        return Color.rgb(255, 109, 0)
+    }
+
+    private fun colorToHex(color: Int): String {
+        return String.format("#%06X", 0xFFFFFF and color)
     }
 
     private fun evaluatePlayMedia(mediaId: String, parentType: String, parentId: String) {
@@ -222,6 +255,26 @@ class MainActivity : AppCompatActivity() {
                 fun updatePosition(pos: Double) {
                     AudioService.updatePosition(pos.toLong() * 1000)
                 }
+
+                @JavascriptInterface
+                fun getMonetAccent(): String {
+                    return colorToHex(getMonetAccentColor())
+                }
+
+                @JavascriptInterface
+                fun isEdgeToEdge(): Boolean {
+                    return true
+                }
+
+                @JavascriptInterface
+                fun enterPip() {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val params = PictureInPictureParams.Builder()
+                            .setAspectRatio(Rational(16, 9))
+                            .build()
+                        enterPictureInPictureMode(params)
+                    }
+                }
             } as Any, "AndroidBridge")
 
             webViewClient = object : WebViewClient() {
@@ -292,6 +345,14 @@ class MainActivity : AppCompatActivity() {
             }));
         } catch(e) {}
     }
+
+    // Inject Monet dynamic color
+    try {
+        var accent = AndroidBridge.getMonetAccent();
+        if (accent) {
+            document.documentElement.style.setProperty('--monet-accent', accent);
+        }
+    } catch(e) {}
 
     var _origSettingsSave = window.SettingsManager ? window.SettingsManager.prototype.save : null;
     if (_origSettingsSave) {
@@ -386,6 +447,20 @@ class MainActivity : AppCompatActivity() {
         webView.evaluateJavascript(
             "window.player && window.player.updateNowPlaying && window.player.updateNowPlaying()", null
         )
+        if (isInPictureInPictureMode) {
+            webView.evaluateJavascript(
+                "if (window.hideNowPlaying) window.hideNowPlaying()", null
+            )
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (isInPictureInPictureMode) {
+            webView.evaluateJavascript(
+                "if (window.hideNowPlaying) window.hideNowPlaying()", null
+            )
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
