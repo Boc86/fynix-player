@@ -1,6 +1,6 @@
-# Fynix Player
+# Fynix Player (vibe coded in conjuction with OpenCode and Big Pickle. This app contains code produced by AI)
 
-A self-contained Android music player that connects to [Navidrome](https://www.navidrome.org/) and [SoulSync](https://github.com/Nezreka/SoulSync) for browsing, streaming, and managing your music library. Built as a WebView wrapper with an embedded HTTP server — no external dependencies on the phone.
+A light-weight, self-contained Android music player that connects to [Navidrome](https://www.navidrome.org/) and [SoulSync](https://github.com/Nezreka/SoulSync) for browsing, streaming, and managing your music library. Built as a WebView wrapper with an embedded HTTP server — no external dependencies on the phone.
 
 <p>
   <img src="screenshots/home.png" width="200" alt="Home">
