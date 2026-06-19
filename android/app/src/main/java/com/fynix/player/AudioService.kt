@@ -141,9 +141,18 @@ class AudioService : android.app.Service() {
             MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS or
             MediaSessionCompat.FLAG_HANDLES_QUEUE_COMMANDS
         )
+        mediaSession.setSessionActivity(
+            PendingIntent.getActivity(this, 0,
+                Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        )
         mediaSession.setCallback(object : MediaSessionCompat.Callback() {
             override fun onPlay() { dispatchAction(ACTION_PLAY) }
             override fun onPause() { dispatchAction(ACTION_PAUSE) }
+            override fun onStop() { dispatchAction(ACTION_PAUSE) }
             override fun onSkipToNext() { dispatchAction(ACTION_NEXT) }
             override fun onSkipToPrevious() { dispatchAction(ACTION_PREV) }
             override fun onPlayFromMediaId(mediaId: String, extras: Bundle?) {
@@ -257,6 +266,8 @@ class AudioService : android.app.Service() {
                 .setActions(
                     PlaybackStateCompat.ACTION_PLAY or
                     PlaybackStateCompat.ACTION_PAUSE or
+                    PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                    PlaybackStateCompat.ACTION_STOP or
                     PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
                     PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
                     PlaybackStateCompat.ACTION_SEEK_TO

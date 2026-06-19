@@ -542,8 +542,16 @@ html, body {
   height: 28px;
 }
 .ctrl-play .icon-wrap svg {
-  position: absolute;
   transition: opacity .2s, transform .2s;
+}
+
+.ctrl-play .icon-play,
+.ctrl-play .icon-pause {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .ctrl-play .icon-play { opacity: 1; transform: scale(1); }
 .ctrl-play .icon-pause { opacity: 0; transform: scale(0.6); }
