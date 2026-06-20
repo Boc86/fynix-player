@@ -122,7 +122,7 @@ class BrowserService : MediaBrowserServiceCompat() {
 
     private suspend fun loadAlbums(): List<MediaBrowserCompat.MediaItem> {
         return navidrome.getAlbumList2("newest", 500).map { a ->
-            createPlayableItem(a.name, "|album:${a.id}", a.artist, a.coverArt)
+            createBrowsableItem(a.name, "album_${a.id}", a.artist)
         }
     }
 
@@ -130,14 +130,14 @@ class BrowserService : MediaBrowserServiceCompat() {
         val items = mutableListOf<MediaBrowserCompat.MediaItem>()
         items.add(createPlayableItem("Shuffle All", "shuffle_all", "Play all songs shuffled", ""))
         navidrome.getPlaylists().forEach { p ->
-            items.add(createPlayableItem(p.name, "|playlist:${p.id}", "${p.songCount} tracks", ""))
+            items.add(createBrowsableItem(p.name, "playlist_${p.id}", "${p.songCount} tracks"))
         }
         return items
     }
 
     private suspend fun loadArtistAlbums(artistId: String): List<MediaBrowserCompat.MediaItem> {
         return navidrome.getArtist(artistId).map { a ->
-            createPlayableItem(a.name, "|album:${a.id}", a.artist, a.coverArt)
+            createBrowsableItem(a.name, "album_${a.id}", a.artist)
         }
     }
 
