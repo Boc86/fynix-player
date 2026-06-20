@@ -260,7 +260,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @JavascriptInterface
-                fun getVersion(): String = "1.1.0"
+                fun getVersion(): String = "1.1.1"
 
                 @JavascriptInterface
                 fun updatePosition(pos: Double) {
