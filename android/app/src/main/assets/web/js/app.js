@@ -676,7 +676,7 @@
   }
 
   function getAppVersion() {
-    return window.AndroidBridge?.getVersion?.() || '1.1.1'
+    return window.AndroidBridge?.getVersion?.() || '1.1.2'
   }
 
   // --- Offline Cache ---
@@ -699,7 +699,11 @@
   function cacheTrack(track) {
     if (!window.AndroidBridge || _cachingTracks[track.id] || _isCached(track.id)) return
     _cachingTracks[track.id] = true
-    const url = _origStreamUrl ? _origStreamUrl(track.id) : navidrome.streamUrl(track.id)
+    let url = _origStreamUrl ? _origStreamUrl(track.id) : navidrome.streamUrl(track.id)
+    url = url.replace(/format=[^&]+/, 'format=mp3')
+    if (url.indexOf('format=') === -1) {
+      url += (url.includes('?') ? '&' : '?') + 'format=mp3'
+    }
     AndroidBridge.cacheTrack(
       track.id, url,
       track.title || track.name || '',

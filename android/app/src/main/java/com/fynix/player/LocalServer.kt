@@ -70,7 +70,7 @@ class LocalServer(
             return proxyRequest(target, finalBody, proxyHeaders, proxyMethod)
         }
 
-        if (uri.startsWith("/api/") && !uri.startsWith("/api/navidrome")) {
+        if (uri.startsWith("/api/") && !uri.startsWith("/api/navidrome") && !uri.startsWith("/api/cached/")) {
             val body = if (method == Method.POST) readBody(session) else ""
             val target = "http://localhost:8008$uri"
             val m = if (method == Method.POST) "POST" else "GET"
@@ -177,8 +177,20 @@ class LocalServer(
         if (uri.startsWith("/api/cached/") && cacheDir != null) {
             val trackId = uri.removePrefix("/api/cached/")
             val safeId = trackId.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
-            val file = File(File(cacheDir, "audio"), "${safeId}.mp3")
-            if (file.exists()) {
+            val audioDir = File(cacheDir, "audio")
+            val file = audioDir.listFiles()?.find { it.name.startsWith("$safeId.") && it.isFile }
+            if (file != null) {
+                val ext = file.extension.lowercase()
+                val mime = when (ext) {
+                    "ogg" -> "audio/ogg"
+                    "mp3" -> "audio/mpeg"
+                    "flac" -> "audio/flac"
+                    "wav" -> "audio/wav"
+                    "m4a", "aac", "mp4" -> "audio/mp4"
+                    "opus" -> "audio/opus"
+                    "webm" -> "audio/webm"
+                    else -> "audio/mpeg"
+                }
                 val rangeHeader = session.headers?.get("range")
                 val fileLen = file.length()
                 if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
@@ -196,12 +208,12 @@ class LocalServer(
                         offset += read
                     }
                     fis.close()
-                    val resp = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, "audio/mpeg", data.inputStream(), len.toLong())
+                    val resp = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mime, data.inputStream(), len.toLong())
                     resp.addHeader("Content-Range", "bytes $start-$end/$fileLen")
                     resp.addHeader("Accept-Ranges", "bytes")
                     return resp
                 }
-                val resp = newFixedLengthResponse(Response.Status.OK, "audio/mpeg", file.inputStream(), fileLen)
+                val resp = newFixedLengthResponse(Response.Status.OK, mime, file.inputStream(), fileLen)
                 resp.addHeader("Accept-Ranges", "bytes")
                 return resp
             }

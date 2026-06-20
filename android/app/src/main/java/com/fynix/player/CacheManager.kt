@@ -81,12 +81,21 @@ class CacheManager(private val context: Context) {
     fun cacheTrack(trackId: String, streamUrl: String, title: String, artist: String, album: String, duration: Int = 0, onProgress: ((Int) -> Unit)? = null) {
         scope.launch {
             try {
-                val file = File(audioDir, "${sanitizeId(trackId)}.mp3")
                 val url = URL(streamUrl)
                 val conn = url.openConnection() as HttpURLConnection
                 conn.connectTimeout = 15000
                 conn.readTimeout = 120000
                 conn.instanceFollowRedirects = true
+                val contentType = conn.contentType ?: ""
+                val ext = when {
+                    contentType.contains("ogg", ignoreCase = true) -> "ogg"
+                    contentType.contains("mpeg", ignoreCase = true) || contentType.contains("mp3", ignoreCase = true) -> "mp3"
+                    contentType.contains("flac", ignoreCase = true) -> "flac"
+                    contentType.contains("wav", ignoreCase = true) -> "wav"
+                    contentType.contains("aac", ignoreCase = true) || contentType.contains("m4a", ignoreCase = true) -> "m4a"
+                    else -> "mp3"
+                }
+                val file = File(audioDir, "${sanitizeId(trackId)}.$ext")
                 val total = conn.contentLength
                 val input = conn.inputStream
                 val output = RandomAccessFile(file, "rw")
@@ -125,8 +134,8 @@ class CacheManager(private val context: Context) {
     }
 
     fun getCachedPath(trackId: String): String? {
-        val file = File(audioDir, "${sanitizeId(trackId)}.mp3")
-        return if (file.exists()) file.absolutePath else null
+        val safeId = sanitizeId(trackId)
+        return audioDir.listFiles()?.find { it.name.startsWith("$safeId.") && it.isFile }?.absolutePath
     }
 
     fun hasCached(trackId: String): Boolean {
@@ -134,8 +143,8 @@ class CacheManager(private val context: Context) {
     }
 
     fun deleteTrack(trackId: String) {
-        val file = File(audioDir, "${sanitizeId(trackId)}.mp3")
-        file.delete()
+        val safeId = sanitizeId(trackId)
+        audioDir.listFiles()?.find { it.name.startsWith("$safeId.") && it.isFile }?.delete()
         val entries = loadManifest()
         entries.remove(trackId)
         saveManifest(entries)
@@ -167,8 +176,8 @@ class CacheManager(private val context: Context) {
         val sorted = entries.values.sortedBy { it.cachedAt }
         for (entry in sorted) {
             if (total <= maxSizeBytes) break
-            val file = File(audioDir, "${sanitizeId(entry.trackId)}.mp3")
-            file.delete()
+            val safeId = sanitizeId(entry.trackId)
+            audioDir.listFiles()?.find { it.name.startsWith("$safeId.") && it.isFile }?.delete()
             entries.remove(entry.trackId)
             total -= entry.fileSize
         }
