@@ -6,7 +6,6 @@ A light-weight, self-contained Android music player that connects to [Navidrome]
   <img src="screenshots/home.png" width="200" alt="Home">
   <img src="screenshots/library.png" width="200" alt="Library">
   <img src="screenshots/search.png" width="200" alt="Search">
-  <img src="screenshots/settings.png" width="200" alt="Settings">
   <img src="screenshots/sidebar.png" width="200" alt="Sidebar">
 </p>
 
@@ -64,7 +63,6 @@ If you find this project useful, consider supporting development on Ko-fi. Every
 | ![Home](screenshots/home.png) | Dashboard with recently played, new releases, and random picks |
 | ![Library](screenshots/library.png) | Album library with lazy-loaded grid |
 | ![Search](screenshots/search.png) | Search view |
-| ![Settings](screenshots/settings.png) | Playback, storage, and server configuration panels |
 | ![Sidebar](screenshots/sidebar.png) | Navigation sidebar with server status and version |
 
 ## Download
