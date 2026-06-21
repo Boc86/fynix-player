@@ -189,6 +189,17 @@ class NavidromeClient(
         return "${server.trimEnd('/')}/rest/stream.view?id=${URLEncoder.encode(songId, "UTF-8")}&$params"
     }
 
+    suspend fun getSong(id: String): NavSong? {
+        val resp = request("getSong", mapOf("id" to id)) ?: return null
+        val song = resp.optJSONObject("song") ?: return null
+        return NavSong(
+            song.getString("id"), song.getString("title"),
+            song.optString("artist", ""), song.optString("album", ""),
+            song.optString("albumId", ""), song.optInt("duration", 0),
+            song.optInt("track", 0), song.optString("coverArt", "")
+        )
+    }
+
     fun coverUrl(coverArt: String, size: Int = 300): String {
         if (coverArt.isBlank()) return ""
         val params = "u=${URLEncoder.encode(username, "UTF-8")}&p=enc:${hexPassword()}&v=1.12.0&c=fynix&size=$size"

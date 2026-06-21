@@ -1,61 +1,65 @@
 class MusicPlayer {
   constructor() {
-    this.audio = new Audio()
-    this.audio.crossOrigin = 'anonymous'
+    this._native = !!(window.AndroidBridge && typeof window.AndroidBridge.nativeTogglePlay !== 'undefined')
     this.queue = []
     this.currentIndex = -1
     this.repeat = false
     this.shuffle = false
-    this.crossfade = 0 // seconds
+    this.crossfade = 0
     this._savedVolume = 1
     this.listeners = {}
+    this._nativeState = { playing: false, currentTime: 0, duration: 0 }
     this._saveTimer = null
-    this._restored = false
-    this._fading = false
-    this._formatRetries = {} // trackId -> [formats tried]
 
-    // EQ / Web Audio
-    this._eqEnabled = false
-    this._audioCtx = null
-    this._eqNodes = []
-    this._gainNode = null
-
-    this._eqBands = [
-      { freq: 60, type: 'lowshelf' },
-      { freq: 170, type: 'peaking', Q: 0.7 },
-      { freq: 310, type: 'peaking', Q: 0.7 },
-      { freq: 600, type: 'peaking', Q: 0.7 },
-      { freq: 1000, type: 'peaking', Q: 0.7 },
-      { freq: 3000, type: 'peaking', Q: 0.7 },
-      { freq: 6000, type: 'peaking', Q: 0.7 },
-      { freq: 12000, type: 'peaking', Q: 0.7 },
-      { freq: 14000, type: 'peaking', Q: 0.7 },
-      { freq: 16000, type: 'highshelf' }
-    ]
-
-    // Gapless preloader
-    this._preloadAudio = new Audio()
-    this._preloadAudio.preload = 'auto'
-    this._gapless = true
-
-    this.audio.addEventListener('timeupdate', () => {
-      this._emit('timeupdate', this.getState())
-      this._scheduleSave()
-      this._checkPreload()
-    })
-    this.audio.addEventListener('ended', () => this._onEnded())
-    this.audio.addEventListener('loadedmetadata', () => this._emit('loaded', this.getState()))
-    this.audio.addEventListener('play', () => this._emit('play', this.getState()))
-    this.audio.addEventListener('pause', () => {
-      this._emit('pause', this.getState())
-      this._saveState()
-    })
-    this.audio.addEventListener('error', (e) => this._onError(e))
-    this._restoreState()
-    window.addEventListener('beforeunload', () => this._saveState())
+    if (!this._native) {
+      this.audio = new Audio()
+    } else {
+      this.audio = new Audio() // dummy — never set src; playback through ExoPlayer bridge
+    }
+    if (!this._native) {
+      this.audio.crossOrigin = 'anonymous'
+      this._restored = false
+      this._fading = false
+      this._formatRetries = {}
+      this._eqEnabled = false
+      this._audioCtx = null
+      this._eqNodes = []
+      this._gainNode = null
+      this._eqBands = [
+        { freq: 60, type: 'lowshelf' },
+        { freq: 170, type: 'peaking', Q: 0.7 },
+        { freq: 310, type: 'peaking', Q: 0.7 },
+        { freq: 600, type: 'peaking', Q: 0.7 },
+        { freq: 1000, type: 'peaking', Q: 0.7 },
+        { freq: 3000, type: 'peaking', Q: 0.7 },
+        { freq: 6000, type: 'peaking', Q: 0.7 },
+        { freq: 12000, type: 'peaking', Q: 0.7 },
+        { freq: 14000, type: 'peaking', Q: 0.7 },
+        { freq: 16000, type: 'highshelf' }
+      ]
+      this._preloadAudio = new Audio()
+      this._preloadAudio.preload = 'auto'
+      this._gapless = true
+      this.audio.addEventListener('timeupdate', () => {
+        this._emit('timeupdate', this.getState())
+        this._scheduleSave()
+        this._checkPreload()
+      })
+      this.audio.addEventListener('ended', () => this._onEnded())
+      this.audio.addEventListener('loadedmetadata', () => this._emit('loaded', this.getState()))
+      this.audio.addEventListener('play', () => this._emit('play', this.getState()))
+      this.audio.addEventListener('pause', () => {
+        this._emit('pause', this.getState())
+        this._saveState()
+      })
+      this.audio.addEventListener('error', (e) => this._onError(e))
+      this._restoreState()
+      window.addEventListener('beforeunload', () => this._saveState())
+    }
   }
 
   _onError(e) {
+    if (this._native) return
     const track = this.queue[this.currentIndex]
     if (!track || !track.id) { this._emit('error', e); return }
     const retries = this._formatRetries[track.id] || []
@@ -83,7 +87,7 @@ class MusicPlayer {
   }
 
   _initEq() {
-    if (this._audioCtx) return
+    if (this._native || this._audioCtx) return
     try {
       this._audioCtx = new (window.AudioContext || window.webkitAudioContext)()
       const src = this._audioCtx.createMediaElementSource(this.audio)
@@ -121,12 +125,13 @@ class MusicPlayer {
   }
 
   setGapless(on) {
+    if (this._native) return
     this._gapless = on
     if (!on) { this._preloadAudio.pause(); this._preloadAudio.src = '' }
   }
 
   _checkPreload() {
-    if (!this._gapless) return
+    if (this._native || !this._gapless) return
     const dur = this.audio.duration
     if (!dur || dur <= 0) return
     const timeLeft = dur - this.audio.currentTime
@@ -134,6 +139,7 @@ class MusicPlayer {
   }
 
   _preloadNext() {
+    if (this._native) return
     let nextIdx = this.shuffle ? Math.floor(Math.random() * this.queue.length) : this.currentIndex + 1
     if (nextIdx >= this.queue.length) nextIdx = this.repeat ? 0 : -1
     if (nextIdx < 0 || nextIdx >= this.queue.length) return
@@ -153,6 +159,25 @@ class MusicPlayer {
   }
 
   _saveState() {
+    if (this._native) {
+      try {
+        if (!this.queue.length) return
+        const data = {
+          queue: this.queue.map(t => ({
+            id: t.id, title: t.title, name: t.name,
+            artist: t.artist, artist_name: t.artist_name, albumArtist: t.albumArtist,
+            album: t.album, albumName: t.albumName, duration: t.duration,
+            track: t.track, coverArt: t.coverArt, streamUrl: t.streamUrl, coverUrl: t.coverUrl
+          })),
+          currentIndex: this.currentIndex,
+          currentTime: 0, playing: false,
+          repeat: this.repeat, shuffle: this.shuffle,
+          volume: 1, timestamp: Date.now()
+        }
+        localStorage.setItem('fynix_playback_state', JSON.stringify(data))
+      } catch (_) {}
+      return
+    }
     try {
       const state = this.getState()
       if (!state.queue.length) return
@@ -191,11 +216,12 @@ class MusicPlayer {
       const data = JSON.parse(raw)
       if (!data.queue || !data.queue.length) return
       const age = Date.now() - (data.timestamp || 0)
-      if (age > 86400000) return // discard after 24h
+      if (age > 86400000) return
       this.queue = data.queue
       this.currentIndex = data.currentIndex >= 0 && data.currentIndex < data.queue.length ? data.currentIndex : 0
       this.repeat = data.repeat || false
       this.shuffle = data.shuffle || false
+      if (this._native) return
       if (data.volume !== undefined) this.audio.volume = data.volume
       this._restored = true
       this._restoredPlaying = !!data.playing
@@ -213,6 +239,20 @@ class MusicPlayer {
 
   getState() {
     const track = this.queue[this.currentIndex] || null
+    if (this._native) {
+      return {
+        currentTrack: track,
+        queue: this.queue,
+        currentIndex: this.currentIndex,
+        playing: this._nativeState.playing || false,
+        currentTime: this._nativeState.currentTime || 0,
+        duration: this._nativeState.duration || track?.duration || 0,
+        trackDuration: track?.duration || 0,
+        volume: 1,
+        repeat: this.repeat,
+        shuffle: this.shuffle
+      }
+    }
     return {
       currentTrack: track,
       queue: this.queue,
@@ -255,6 +295,21 @@ class MusicPlayer {
   _loadCurrent(autoplay = true) {
     const track = this.queue[this.currentIndex]
     if (!track) return
+    if (this._native) {
+      if (window.AndroidBridge) {
+        window.AndroidBridge.playStream(JSON.stringify({
+          id: track.id || '',
+          streamUrl: track.streamUrl || '',
+          title: track.title || track.name || 'Unknown',
+          artist: track.artist || track.artist_name || track.albumArtist || '',
+          album: track.album || track.albumName || '',
+          coverUrl: track.coverUrl || track.coverArt || '',
+          duration: track.duration || 0
+        }))
+      }
+      this._emit('loaded', this.getState())
+      return
+    }
     this.audio.src = track.streamUrl || ''
     this.audio.load()
     if (autoplay) {
@@ -287,6 +342,12 @@ class MusicPlayer {
   }
 
   togglePlay() {
+    if (this._native) {
+      if (window.AndroidBridge) {
+        window.AndroidBridge.nativeTogglePlay()
+      }
+      return
+    }
     if (this.audio.paused) {
       if (this.audio.src) {
         this.audio.play().catch(() => {})
@@ -298,11 +359,35 @@ class MusicPlayer {
     }
   }
 
+  playNative() {
+    if (this._native && window.AndroidBridge) {
+      window.AndroidBridge.nativeTogglePlay()
+    }
+  }
+
+  pauseNative() {
+    if (this._native && window.AndroidBridge) {
+      window.AndroidBridge.nativeTogglePlay()
+    }
+  }
+
   seek(time) {
+    if (this._native) {
+      if (window.AndroidBridge) {
+        window.AndroidBridge.nativeSeekTo(Math.round(time * 1000))
+      }
+      return
+    }
     this.audio.currentTime = time
   }
 
   setVolume(v) {
+    if (this._native) {
+      if (window.AndroidBridge) {
+        window.AndroidBridge.nativeSetVolume(Math.max(0, Math.min(1, v)))
+      }
+      return
+    }
     if (this._fading) return
     this.audio.volume = Math.max(0, Math.min(1, v))
     this._savedVolume = this.audio.volume
@@ -313,6 +398,7 @@ class MusicPlayer {
   }
 
   _fadeOut(callback) {
+    if (this._native) { callback(); return }
     const dur = this.crossfade
     if (dur <= 0 || this.audio.volume <= 0) { callback(); return }
     this._fading = true
@@ -334,6 +420,7 @@ class MusicPlayer {
   }
 
   _fadeIn() {
+    if (this._native) { return }
     const dur = this.crossfade
     if (dur <= 0) { this.audio.volume = this._savedVolume; return }
     const target = this._savedVolume
@@ -403,6 +490,12 @@ class MusicPlayer {
   clearQueue() {
     this.queue = []
     this.currentIndex = -1
+    if (this._native) {
+      if (window.AndroidBridge) {
+        window.AndroidBridge.nativeTogglePlay()
+      }
+      return
+    }
     this.audio.pause()
     this.audio.src = ''
   }

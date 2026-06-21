@@ -1,6 +1,6 @@
 # Fynix Player (vibe coded in conjuction with OpenCode and Big Pickle. This app contains code produced by AI)
 
-A light-weight, self-contained Android music player that connects to [Navidrome](https://www.navidrome.org/) and [SoulSync](https://github.com/Nezreka/SoulSync) for browsing, streaming, and managing your music library. Built as a WebView wrapper with an embedded HTTP server — no external dependencies on the phone.
+A light-weight, self-contained Android music player that connects to [Navidrome](https://www.navidrome.org/) and [SoulSync](https://github.com/Nezreka/SoulSync) for browsing, streaming, and managing your music library. Built as a WebView wrapper with an embedded HTTP server and native [ExoPlayer](https://developer.android.com/media/media3/exoplayer) audio playback — no external dependencies on the phone.
 
 <p>
   <img src="screenshots/home.png" width="200" alt="Home">
@@ -19,8 +19,8 @@ If you find this project useful, consider supporting development on Ko-fi. Every
 ## Features
 
 ### Music Playback
-- **Navidrome streaming** — browse albums, artists, playlists, genres; search tracks; stream via MP3 transcoding
-- **Play All / Shuffle All** — play or shuffle entire albums, artists, genres, or your full library
+- **Navidrome streaming** — browse albums, artists, playlists, genres; search tracks; stream via MP3/OGG transcoding
+- **Native ExoPlayer audio** — ExoPlayer handles all playback in a foreground service for reliable background audio and Android Auto routing
 - **Queue management** — play, shuffle, repeat, seek, volume control with a persistent queue
 - **Crossfade & Gapless** — smooth transitions between tracks
 - **Equalizer** — 10-band EQ with presets, enabled directly in the player
@@ -44,8 +44,9 @@ If you find this project useful, consider supporting development on Ko-fi. Every
 - **In-app configuration** — all server settings adjustable from Settings at any time
 
 ### Android Integration
-- **Android Auto** — browse artists/albums/playlists from your car head unit; voice search via Google Assistant; Shuffle All
+- **Android Auto** — browse artists/albums/playlists from your car head unit; voice search via Google Assistant; Shuffle All; audio routed through ExoPlayer
 - **Lock-screen & notification controls** — play/pause/next/prev from notification, lockscreen, and Bluetooth
+- **Foreground service playback** — ExoPlayer runs in a foreground service to prevent background playback restrictions on Android 14+
 - **Picture-in-Picture** — continue watching now-playing info while using other apps
 - **Edge-to-edge** — full-screen display with gesture navigation support
 - **Monet theming** — dynamic color extraction from your wallpaper (Android 12+)
@@ -190,7 +191,7 @@ Requires Android Studio / SDK with API 34 installed.
 
 - **Frontend**: Vanilla JS, CSS (no frameworks)
 - **Backend**: NanoHTTPD (embedded Java HTTP server inside APK)
-- **Android**: Kotlin, WebView, Media3/ExoPlayer, MediaBrowserService
+- **Android**: Kotlin, WebView, **ExoPlayer (Media3)** for native audio, WebView-JS bridge, MediaBrowserService
 - **APIs**: Subsonic (Navidrome), REST (SoulSync), MusicBrainz, Wikipedia
 
 ## License

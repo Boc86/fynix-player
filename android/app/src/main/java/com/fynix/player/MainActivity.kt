@@ -45,6 +45,43 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        ExoPlayerHolder.initialize(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(Intent(this, AudioService::class.java))
+        } else {
+            startService(Intent(this, AudioService::class.java))
+        }
+        ExoPlayerHolder.onPositionUpdate = { pos, dur ->
+            if (pageLoaded) {
+                val posSec = pos / 1000.0
+                val durSec = dur / 1000.0
+                webView.post {
+                    webView.evaluateJavascript("window.player._onNativePosition($posSec, $durSec)", null)
+                }
+            }
+        }
+        ExoPlayerHolder.onPlayStateChange = { playing ->
+            if (pageLoaded) {
+                webView.post {
+                    webView.evaluateJavascript("window.player._onNativePlayState($playing)", null)
+                }
+            }
+        }
+        ExoPlayerHolder.onTrackEnded = {
+            if (pageLoaded) {
+                webView.post {
+                    webView.evaluateJavascript("window.player._onNativeEnded()", null)
+                }
+            }
+        }
+        ExoPlayerHolder.onTrackError = { msg ->
+            if (pageLoaded) {
+                webView.post {
+                    val safe = msg.replace("'", "\\'")
+                    webView.evaluateJavascript("window.player._onNativeError('$safe')", null)
+                }
+            }
+        }
         mediaActionCallback = { action -> handleMediaAction(action) }
         playMediaCallback = { mediaId, parentType, parentId ->
             if (pageLoaded) {
@@ -281,11 +318,41 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @JavascriptInterface
-                fun getVersion(): String = "1.1.4"
+                fun getVersion(): String = "1.2.0"
 
                 @JavascriptInterface
                 fun updatePosition(pos: Double) {
                     AudioService.updatePosition(pos.toLong() * 1000)
+                }
+
+                @JavascriptInterface
+                fun playStream(json: String) {
+                    try {
+                        val obj = org.json.JSONObject(json)
+                        val id = obj.optString("id", "")
+                        val streamUrl = obj.optString("streamUrl", "")
+                        val title = obj.optString("title", obj.optString("name", "Unknown"))
+                        val artist = obj.optString("artist", obj.optString("artist_name", ""))
+                        val album = obj.optString("album", obj.optString("albumName", ""))
+                        val coverUrl = obj.optString("coverUrl", obj.optString("coverArt", ""))
+                        val duration = obj.optInt("duration", 0)
+                        ExoPlayerHolder.playStream(id, streamUrl, title, artist, album, coverUrl, duration)
+                    } catch (_: Exception) {}
+                }
+
+                @JavascriptInterface
+                fun nativeTogglePlay() {
+                    ExoPlayerHolder.togglePlay()
+                }
+
+                @JavascriptInterface
+                fun nativeSeekTo(ms: Long) {
+                    ExoPlayerHolder.seekTo(ms)
+                }
+
+                @JavascriptInterface
+                fun nativeSetVolume(vol: Float) {
+                    ExoPlayerHolder.setVolume(vol)
                 }
 
                 @JavascriptInterface
@@ -483,35 +550,6 @@ class MainActivity : AppCompatActivity() {
     // Periodic backup: sync localStorage → SharedPreferences every 10s
     setInterval(pushSettingsToAndroid, 10000);
 
-    function sendUpdate() {
-        var p = window.player;
-        if (!p) return;
-        var state = p.getState ? p.getState() : {};
-        var t = state.currentTrack;
-        if (t) {
-            AndroidBridge.updateNowPlaying(JSON.stringify({
-                title: t.title || t.name || 'Unknown',
-                artist: t.artist || t.artist_name || t.albumArtist || '',
-                album: t.albumName || t.album || '',
-                coverArt: t.coverUrl || '',
-                duration: t.duration || 0,
-                mediaId: t.id || '',
-                track: t.track || t.trackNumber || 0,
-                albumArtist: t.albumArtist || t.album_artist || t.artist || ''
-            }));
-        }
-        AndroidBridge.isPlaying(state.playing ? true : false);
-        AndroidBridge.updatePosition(state.currentTime || 0);
-    }
-
-    var origLoad = window.player && window.player.on ? window.player.on : null;
-    if (origLoad) {
-        try { window.player.on('loaded', sendUpdate); } catch(e) {}
-        try { window.player.on('play', sendUpdate); } catch(e) {}
-        try { window.player.on('pause', sendUpdate); } catch(e) {}
-        try { window.player.on('timeupdate', function() { AndroidBridge.isPlaying(true); }); } catch(e) {}
-    }
-
     // Set SoulSync proxy to embedded local server (always localhost:8080 on Android)
     try { localStorage.setItem('soulsync_proxy', 'http://localhost:8080'); } catch(e) {}
     if (window.soulsync) window.soulsync.proxyUrl = 'http://localhost:8080';
@@ -520,29 +558,27 @@ class MainActivity : AppCompatActivity() {
     try { if (!localStorage.getItem('navidrome_stream_format')) localStorage.setItem('navidrome_stream_format', 'mp3'); } catch(e) {}
     try { if (window.__navidrome && !window.__navidrome.streamFormat) window.__navidrome.streamFormat = 'mp3'; } catch(e) {}
 
-    setInterval(function() {
-        if (window.player && window.player.getState) {
-            var s = window.player.getState();
-            var t = s.currentTrack;
-            if (t) {
-                AndroidBridge.updateNowPlaying(JSON.stringify({
-                    title: t.title || t.name || 'Unknown',
-                    artist: t.artist || t.artist_name || t.albumArtist || '',
-                    album: t.albumName || t.album || '',
-                    coverArt: t.coverUrl || '',
-                    duration: t.duration || 0,
-                    mediaId: t.id || '',
-                    track: t.track || t.trackNumber || 0,
-                    albumArtist: t.albumArtist || t.album_artist || t.artist || ''
-                }));
-            }
-            AndroidBridge.isPlaying(s.playing ? true : false);
-            AndroidBridge.updatePosition(s.currentTime || 0);
-        }
-    }, 2000);
-
-    // Send initial state immediately
-    sendUpdate();
+    // Native ExoPlayer state handlers (called from Kotlin bridge)
+    var p = window.player;
+    if (p) {
+        p._onNativePosition = function(posSec, durSec) {
+            p._nativeState = p._nativeState || {};
+            p._nativeState.currentTime = posSec;
+            p._nativeState.duration = durSec;
+            p._emit('timeupdate', p.getState());
+        };
+        p._onNativePlayState = function(playing) {
+            p._nativeState = p._nativeState || {};
+            p._nativeState.playing = playing;
+            p._emit(playing ? 'play' : 'pause', p.getState());
+        };
+        p._onNativeEnded = function() {
+            p.next();
+        };
+        p._onNativeError = function(msg) {
+            p._emit('error', msg);
+        };
+    }
 })();
 """.trimIndent()
         webView.evaluateJavascript(js, null)
@@ -590,14 +626,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleMediaAction(action: String) {
+        if (action.startsWith("search:")) {
+            val query = action.removePrefix("search:")
+            val escaped = query.replace("'", "\\'")
+            webView.evaluateJavascript(
+                "window.navigate('search');var i=document.getElementById('search-input');if(i){i.value='$escaped';setTimeout(function(){document.getElementById('search-btn')?.click()},100)}", null
+            )
+            return
+        }
         val js = when (action) {
             AudioService.ACTION_TOGGLE -> "window.player && window.player.togglePlay()"
-            AudioService.ACTION_PLAY -> {
-                "window.player && (function(){ if (window.player.audio && window.player.audio.paused) window.player.togglePlay() })()"
-            }
-            AudioService.ACTION_PAUSE -> {
-                "window.player && (function(){ if (window.player.audio && !window.player.audio.paused) window.player.togglePlay() })()"
-            }
+            AudioService.ACTION_PLAY -> "window.player && window.player.playNative()"
+            AudioService.ACTION_PAUSE -> "window.player && window.player.pauseNative()"
             AudioService.ACTION_NEXT -> "window.player && window.player.next()"
             AudioService.ACTION_PREV -> "window.player && window.player.prev()"
             AudioService.ACTION_SHUFFLE_ALL -> "window.shuffleAll ? window.shuffleAll() : console.log('shuffleAll not found')"

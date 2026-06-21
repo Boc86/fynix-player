@@ -89,6 +89,21 @@ class AudioService : android.app.Service() {
                 }
             }
         }
+
+        fun updateMetadata() {
+            val builder = MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, currentCoverUrl)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, currentDuration.toLong() * 1000L)
+                .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, currentMediaId)
+                .putLong(MediaMetadataCompat.METADATA_KEY_TRACK_NUMBER, currentTrackNumber.toLong())
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ARTIST, currentAlbumArtist.ifEmpty { currentArtist })
+            currentCoverBitmap?.let { builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it) }
+            Log.d("Fynix", "updateMetadata: title=$currentTitle artist=$currentArtist album=$currentAlbum duration=${currentDuration}s hasBitmap=${currentCoverBitmap != null} artUri=$currentCoverUrl")
+            MediaSessionHolder.session?.setMetadata(builder.build())
+        }
     }
 
     private lateinit var mediaSession: MediaSessionCompat
@@ -100,6 +115,7 @@ class AudioService : android.app.Service() {
         super.onCreate()
         instance = this
         createChannel()
+        ExoPlayerHolder.initialize(this)
         setupMediaSession()
         registerNoisyReceiver()
         setupAudioFocus()
@@ -118,27 +134,7 @@ class AudioService : android.app.Service() {
     }
 
     private fun setupAudioFocus() {
-        audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-        audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-            when (focusChange) {
-                AudioManager.AUDIOFOCUS_LOSS -> {
-                    dispatchAction(ACTION_PAUSE)
-                    audioManager?.abandonAudioFocus(audioFocusListener!!)
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                    dispatchAction(ACTION_PAUSE)
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    // Duck: reduce volume — handled via WebView mediaSession ducking
-                    dispatchAction(ACTION_PAUSE)
-                }
-            }
-        }
-        audioManager?.requestAudioFocus(
-            audioFocusListener!!,
-            AudioManager.STREAM_MUSIC,
-            AudioManager.AUDIOFOCUS_GAIN
-        )
+        // Audio focus handled by ExoPlayer's AudioAttributes configuration
     }
 
     private fun createChannel() {
@@ -177,74 +173,19 @@ class AudioService : android.app.Service() {
             override fun onPlayFromMediaId(mediaId: String, extras: Bundle?) {
                 Log.d("Fynix", "onPlayFromMediaId: mediaId=$mediaId")
                 if (mediaId == "shuffle_all") {
-                    Log.d("Fynix", "onPlayFromMediaId: shuffle_all")
-                    val pi = PendingIntent.getActivity(this@AudioService, 9999,
-                        Intent(this@AudioService, MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                            putExtra(EXTRA_ACTION, ACTION_SHUFFLE_ALL)
-                        },
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-                    try { pi.send() } catch (e: Exception) { Log.e("Fynix", "shuffle PI send failed: ${e.message}") }
+                    val cb = MainActivity.mediaActionCallback
+                    if (cb != null) {
+                        try { cb(ACTION_SHUFFLE_ALL) } catch (_: Exception) {}
+                    }
                     return
                 }
-                val delim = mediaId.indexOf('|')
-                val (songId, parentType, parentId) = if (delim >= 0) {
-                    val sid = mediaId.substring(0, delim)
-                    val parent = mediaId.substring(delim + 1)
-                    val colon = parent.indexOf(':')
-                    val pt = if (colon > 0) parent.substring(0, colon) else ""
-                    val pi = if (colon > 0) parent.substring(colon + 1) else ""
-                    Triple(sid, pt, pi)
-                } else {
-                    Triple(mediaId, "", "")
-                }
-                Log.d("Fynix", "onPlayFromMediaId: parsed songId=$songId type=$parentType pid=$parentId")
-                val cb = MainActivity.playMediaCallback
-                Log.d("Fynix", "onPlayFromMediaId: playMediaCallback is ${if (cb != null) "SET" else "NULL"}")
-                if (cb != null) {
-                    try {
-                        cb(songId, parentType, parentId)
-                        Log.d("Fynix", "onPlayFromMediaId: callback invoked OK")
-                    } catch (e: Exception) {
-                        Log.e("Fynix", "onPlayFromMediaId: callback threw: ${e.message}")
-                    }
-                } else {
-                    Log.d("Fynix", "onPlayFromMediaId: no callback, saving to prefs")
-                    getSharedPreferences("fynix_playback", MODE_PRIVATE).edit().apply {
-                        putString("pending_media_id", songId)
-                        putString("pending_parent_type", parentType)
-                        putString("pending_parent_id", parentId)
-                        apply()
-                    }
-                    Log.d("Fynix", "onPlayFromMediaId: sending PendingIntent")
-                    val pi = PendingIntent.getActivity(this@AudioService, System.identityHashCode(mediaId) and 0xFFFF,
-                        Intent(this@AudioService, MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                            putExtra(EXTRA_ACTION, ACTION_PLAY_MEDIA)
-                            putExtra(BrowserService.EXTRA_MEDIA_ID, songId)
-                            putExtra(BrowserService.EXTRA_PARENT_TYPE, parentType)
-                            putExtra(BrowserService.EXTRA_PARENT_ID, parentId)
-                        },
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-                    try { pi.send() } catch (e: Exception) { Log.e("Fynix", "PendingIntent.send failed: ${e.message}") }
-                }
+                ExoPlayerHolder.handlePlayMediaId(mediaId)
             }
             override fun onPlayFromSearch(query: String, extras: Bundle?) {
-                val cb = MainActivity.playMediaCallback
+                val cb = MainActivity.mediaActionCallback
                 if (cb != null) {
-                    cb("", "", "")
+                    cb("search:$query")
                 }
-                val pi = PendingIntent.getActivity(this@AudioService, 9998,
-                    Intent(this@AudioService, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        putExtra(EXTRA_ACTION, "search")
-                        putExtra("query", query)
-                    },
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                try { pi.send() } catch (e: Exception) { Log.e("Fynix", "search PI send failed: ${e.message}") }
             }
         })
         mediaSession.isActive = true
@@ -313,28 +254,13 @@ class AudioService : android.app.Service() {
             }
             android.os.Handler(mainLooper).post {
                 if (currentMediaId == targetMediaId) {
-                    updateMetadata()
+                    AudioService.updateMetadata()
                     updateNotification()
                 } else {
                     Log.d("Fynix", "fetchCoverBitmap: stale (current mid=${currentMediaId} != target=$targetMediaId)")
                 }
             }
         }.start()
-    }
-
-    fun updateMetadata() {
-        val builder = MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, currentCoverUrl)
-            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, currentDuration.toLong() * 1000L)
-            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, currentMediaId)
-            .putLong(MediaMetadataCompat.METADATA_KEY_TRACK_NUMBER, currentTrackNumber.toLong())
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ARTIST, currentAlbumArtist.ifEmpty { currentArtist })
-        currentCoverBitmap?.let { builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it) }
-        Log.d("Fynix", "updateMetadata: title=$currentTitle artist=$currentArtist album=$currentAlbum duration=${currentDuration}s hasBitmap=${currentCoverBitmap != null} artUri=$currentCoverUrl")
-        mediaSession.setMetadata(builder.build())
     }
 
     fun updateMediaSessionState() {
@@ -412,6 +338,7 @@ class AudioService : android.app.Service() {
 
     override fun onDestroy() {
         instance = null
+        ExoPlayerHolder.release()
         noisyReceiver?.let { unregisterReceiver(it) }
         super.onDestroy()
     }
