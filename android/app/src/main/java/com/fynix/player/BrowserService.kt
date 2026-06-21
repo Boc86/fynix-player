@@ -7,6 +7,7 @@ import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.session.MediaSessionCompat
 import androidx.media.MediaBrowserServiceCompat
 import kotlinx.coroutines.*
+import android.util.Log
 import java.net.URLEncoder
 
 class BrowserService : MediaBrowserServiceCompat() {
@@ -30,11 +31,21 @@ class BrowserService : MediaBrowserServiceCompat() {
         super.onCreate()
         startForegroundService(Intent(this, AudioService::class.java))
         val prefs = getSharedPreferences("fynix_settings", MODE_PRIVATE)
+        val navServer = prefs.getString("navidrome_server", "") ?: ""
+        Log.d("Fynix", "BrowserService: server=$navServer")
         navidrome = NavidromeClient(
-            server = prefs.getString("navidrome_server", "") ?: "",
+            server = navServer,
             username = prefs.getString("navidrome_username", "") ?: "",
             password = prefs.getString("navidrome_password", "") ?: ""
         )
+
+        if (CoverArtServerHolder.server == null) {
+            val srv = CoverArtServer(this)
+            srv.start()
+            CoverArtServerHolder.server = srv
+            CoverArtServerHolder.port = srv.port
+            Log.d("Fynix", "CoverArtServer started from BrowserService on port ${srv.port}")
+        }
 
         session = MediaSessionHolder.session
         if (session == null) {
@@ -80,9 +91,12 @@ class BrowserService : MediaBrowserServiceCompat() {
         parentId: String,
         result: Result<MutableList<MediaBrowserCompat.MediaItem>>
     ) {
+        Log.d("Fynix", "onLoadChildren: parentId=$parentId")
         result.detach()
         scope.launch {
-            val items = when (parentId) {
+            Log.d("Fynix", "onLoadChildren: loading parentId=$parentId")
+            val items = try {
+                when (parentId) {
                 ROOT_ID -> loadRootChildren()
                 ARTISTS_ROOT -> loadArtists()
                 ALBUMS_ROOT -> loadAlbums()
@@ -98,10 +112,16 @@ class BrowserService : MediaBrowserServiceCompat() {
                         val id = parentId.removePrefix("playlist_")
                         loadPlaylistSongs(id)
                     } else {
+                        Log.w("Fynix", "onLoadChildren: unknown parentId=$parentId")
                         emptyList()
                     }
                 }
+                }
+            } catch (e: Exception) {
+                Log.e("Fynix", "onLoadChildren: error parentId=$parentId error=${e.message}")
+                emptyList()
             }
+            Log.d("Fynix", "onLoadChildren: result parentId=$parentId items=${items.size}")
             result.sendResult(items.toMutableList())
         }
     }
@@ -115,34 +135,43 @@ class BrowserService : MediaBrowserServiceCompat() {
     }
 
     private suspend fun loadArtists(): List<MediaBrowserCompat.MediaItem> {
-        return navidrome.getArtists().map { a ->
+        val artists = navidrome.getArtists()
+        Log.d("Fynix", "loadArtists: count=${artists.size}")
+        return artists.map { a ->
             createBrowsableItem(a.name, "artist_${a.id}", "${a.albumCount} albums")
         }
     }
 
     private suspend fun loadAlbums(): List<MediaBrowserCompat.MediaItem> {
-        return navidrome.getAlbumList2("newest", 500).map { a ->
-            createBrowsableItem(a.name, "album_${a.id}", a.artist)
+        val albums = navidrome.getAlbumList2("newest", 500)
+        Log.d("Fynix", "loadAlbums: count=${albums.size}")
+        return albums.map { a ->
+            createBrowsableItem(a.name, "album_${a.id}", a.artist, a.coverArt)
         }
     }
 
     private suspend fun loadPlaylists(): List<MediaBrowserCompat.MediaItem> {
+        val playlists = navidrome.getPlaylists()
+        Log.d("Fynix", "loadPlaylists: count=${playlists.size}")
         val items = mutableListOf<MediaBrowserCompat.MediaItem>()
         items.add(createPlayableItem("Shuffle All", "shuffle_all", "Play all songs shuffled", ""))
-        navidrome.getPlaylists().forEach { p ->
-            items.add(createBrowsableItem(p.name, "playlist_${p.id}", "${p.songCount} tracks"))
+        playlists.forEach { p ->
+            items.add(createBrowsableItem(p.name, "playlist_${p.id}", "${p.songCount} tracks", ""))
         }
         return items
     }
 
     private suspend fun loadArtistAlbums(artistId: String): List<MediaBrowserCompat.MediaItem> {
-        return navidrome.getArtist(artistId).map { a ->
-            createBrowsableItem(a.name, "album_${a.id}", a.artist)
+        val albums = navidrome.getArtist(artistId)
+        Log.d("Fynix", "loadArtistAlbums: artistId=$artistId count=${albums.size}")
+        return albums.map { a ->
+            createBrowsableItem(a.name, "album_${a.id}", a.artist, a.coverArt)
         }
     }
 
     private suspend fun loadAlbumSongs(albumId: String): List<MediaBrowserCompat.MediaItem> {
-        val (_, songs) = navidrome.getAlbum(albumId)
+        val (album, songs) = navidrome.getAlbum(albumId)
+        Log.d("Fynix", "loadAlbumSongs: albumId=$albumId songs=${songs.size}, album=${album?.name}")
         return songs.map { s ->
             createPlayableItem(s.title, "${s.id}|album:${albumId}", s.artist, s.coverArt)
         }
@@ -150,17 +179,33 @@ class BrowserService : MediaBrowserServiceCompat() {
 
     private suspend fun loadPlaylistSongs(playlistId: String): List<MediaBrowserCompat.MediaItem> {
         val songs = navidrome.getPlaylist(playlistId)
+        Log.d("Fynix", "loadPlaylistSongs: playlistId=$playlistId songs=${songs.size}")
         return songs.map { s ->
             createPlayableItem(s.title, "${s.id}|playlist:${playlistId}", s.artist, s.coverArt)
         }
     }
 
-    private fun createBrowsableItem(title: String, id: String, subtitle: String): MediaBrowserCompat.MediaItem {
+    private fun localCoverUri(coverArt: String): android.net.Uri? {
+        if (coverArt.isBlank()) return null
+        val port = CoverArtServerHolder.port
+        if (port > 0) {
+            val uri = android.net.Uri.parse("http://127.0.0.1:$port/cover?id=${java.net.URLEncoder.encode(coverArt, "UTF-8")}&size=150")
+            Log.d("Fynix", "localCoverUri: coverArt=$coverArt port=$port uri=$uri")
+            return uri
+        }
+        val u = navidrome.coverUrl(coverArt, 150)
+        Log.w("Fynix", "localCoverUri: server NOT ready (port=0), using direct url=$u")
+        return android.net.Uri.parse(u)
+    }
+
+    private fun createBrowsableItem(title: String, id: String, subtitle: String, coverArt: String = ""): MediaBrowserCompat.MediaItem {
+        val uri = localCoverUri(coverArt)
         return MediaBrowserCompat.MediaItem(
             MediaDescriptionCompat.Builder()
                 .setMediaId(id)
                 .setTitle(title)
                 .setSubtitle(subtitle)
+                .apply { uri?.let { setIconUri(it) } }
                 .build(),
             MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
         )
@@ -169,25 +214,18 @@ class BrowserService : MediaBrowserServiceCompat() {
     private fun createPlayableItem(
         title: String, id: String, artist: String, coverArt: String
     ): MediaBrowserCompat.MediaItem {
+        val uri = localCoverUri(coverArt)
         val desc = MediaDescriptionCompat.Builder()
             .setMediaId(id)
             .setTitle(title)
             .setSubtitle(artist)
-            .apply {
-                if (coverArt.isNotBlank()) {
-                    setIconUri(android.net.Uri.parse(navidrome.coverUrl(coverArt, 150)))
-                }
-            }
+            .apply { uri?.let { setIconUri(it) } }
             .build()
         return MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE)
     }
 
     override fun onDestroy() {
         scope.cancel()
-        if (MediaSessionHolder.session != null) {
-            MediaSessionHolder.session = null
-            session?.release()
-        }
         super.onDestroy()
     }
 }

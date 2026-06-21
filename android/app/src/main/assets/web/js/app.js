@@ -676,7 +676,7 @@
   }
 
   function getAppVersion() {
-    return window.AndroidBridge?.getVersion?.() || '1.1.2'
+    return window.AndroidBridge?.getVersion?.() || '1.1.3'
   }
 
   // --- Offline Cache ---
@@ -1935,8 +1935,10 @@
   }
 
   window.playMediaId = async function (songId, parentType, parentId) {
+    console.log('playMediaId start: songId=' + songId + ' type=' + parentType + ' pid=' + parentId + ' player=' + (typeof player) + ' navidrome=' + (typeof navidrome));
     try {
       if (parentType === 'album' && parentId) {
+        console.log('playMediaId: loading album ' + parentId);
         const resp = await navidrome.getAlbum(parentId)
         const album = resp?.album
         const songs = (album?.song || []).map(s => ({
@@ -1947,8 +1949,13 @@
           albumArtist: album.artist
         }))
         const idx = songs.findIndex(s => s.id === songId)
-        player.playQueue(songs, idx >= 0 ? idx : 0)
+        console.log('playMediaId: songs=' + songs.length + ' idx=' + idx + ' firstUrl=' + (songs[0]?.streamUrl || 'none'));
+        try {
+          player.playQueue(songs, idx >= 0 ? idx : 0)
+          console.log('playMediaId: playQueue OK');
+        } catch(e) { console.error('playMediaId: playQueue threw', e); }
       } else if (parentType === 'playlist' && parentId) {
+        console.log('playMediaId: loading playlist ' + parentId);
         const resp = await navidrome.getPlaylist(parentId)
         const entries = resp?.playlist?.entry || []
         const songs = entries.map(s => ({
@@ -1957,8 +1964,13 @@
           coverUrl: navidrome.coverUrl(s.id, 300)
         }))
         const idx = songs.findIndex(s => s.id === songId)
-        player.playQueue(songs, idx >= 0 ? idx : 0)
+        console.log('playMediaId: songs=' + songs.length + ' idx=' + idx);
+        try {
+          player.playQueue(songs, idx >= 0 ? idx : 0)
+          console.log('playMediaId: playQueue OK');
+        } catch(e) { console.error('playMediaId: playQueue threw', e); }
       } else if (songId) {
+        console.log('playMediaId: playing single song ' + songId);
         const resp = await navidrome.getSong(songId)
         const song = resp?.song
         if (song) {
@@ -1970,10 +1982,12 @@
         } else {
           player.playQueue([{ id: songId, streamUrl: navidrome.streamUrl(songId) }], 0)
         }
+        console.log('playMediaId: playQueue OK');
       }
     } catch (e) {
       console.error('playMediaId error', e)
     }
+    console.log('playMediaId: done');
   }
 
   window.shuffleAll = async function () {

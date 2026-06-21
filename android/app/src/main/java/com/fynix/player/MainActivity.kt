@@ -68,6 +68,24 @@ class MainActivity : AppCompatActivity() {
             }
         })
         queuePendingFromIntent(intent)
+        checkPendingFromPrefs()
+    }
+
+    private fun checkPendingFromPrefs() {
+        val prefs = getSharedPreferences("fynix_playback", MODE_PRIVATE)
+        val mid = prefs.getString("pending_media_id", null)
+        val pa = prefs.getString("pending_action", null)
+        val pt = prefs.getString("pending_parent_type", "") ?: ""
+        val pi = prefs.getString("pending_parent_id", "") ?: ""
+        Log.d("Fynix", "checkPendingFromPrefs: mid=$mid action=$pa")
+        prefs.edit().clear().apply()
+        if (mid != null) {
+            pendingMediaId = mid
+            pendingParentType = pt
+            pendingParentId = pi
+        } else if (pa != null) {
+            pendingAction = pa
+        }
     }
 
     private fun enableEdgeToEdge() {
@@ -94,11 +112,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun evaluatePlayMedia(mediaId: String, parentType: String, parentId: String) {
+        Log.d("Fynix", "evaluatePlayMedia: id=$mediaId type=$parentType pid=$parentId")
         val safeId = mediaId.replace("'", "\\'")
         val safeType = parentType.replace("'", "\\'")
         val safePid = parentId.replace("'", "\\'")
         webView.evaluateJavascript(
-            "window.playMediaId('$safeId','$safeType','$safePid')", null
+            "console.log('playMediaId called from Android'); window.playMediaId('$safeId','$safeType','$safePid')", null
         )
     }
 
@@ -123,6 +142,7 @@ class MainActivity : AppCompatActivity() {
             pendingMediaId = intent.getStringExtra(BrowserService.EXTRA_MEDIA_ID)
             pendingParentType = intent.getStringExtra(BrowserService.EXTRA_PARENT_TYPE) ?: ""
             pendingParentId = intent.getStringExtra(BrowserService.EXTRA_PARENT_ID) ?: ""
+            getSharedPreferences("fynix_playback", MODE_PRIVATE).edit().clear().apply()
         } else {
             pendingAction = action
         }
@@ -229,6 +249,7 @@ class MainActivity : AppCompatActivity() {
                             putString("navidrome_server", obj.optString("navidrome_server", ""))
                             putString("navidrome_username", obj.optString("navidrome_username", ""))
                             putString("navidrome_password", obj.optString("navidrome_password", ""))
+                            putString("navidrome_proxy", obj.optString("navidrome_proxy", ""))
                             putString("soulsync_server", obj.optString("soulsync_server", ""))
                             putString("soulsync_apikey", obj.optString("soulsync_apikey", ""))
                             apply()
@@ -260,7 +281,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @JavascriptInterface
-                fun getVersion(): String = "1.1.2"
+                fun getVersion(): String = "1.1.3"
 
                 @JavascriptInterface
                 fun updatePosition(pos: Double) {
@@ -425,6 +446,7 @@ class MainActivity : AppCompatActivity() {
                 navidrome_server: ns,
                 navidrome_username: nu,
                 navidrome_password: np,
+                navidrome_proxy: localStorage.getItem('navidrome_proxy') || '',
                 soulsync_server: ss,
                 soulsync_apikey: sa
             }));
@@ -489,10 +511,6 @@ class MainActivity : AppCompatActivity() {
         try { window.player.on('pause', sendUpdate); } catch(e) {}
         try { window.player.on('timeupdate', function() { AndroidBridge.isPlaying(true); }); } catch(e) {}
     }
-
-    // Clear Navidrome proxy (direct connection for streaming, no proxy endpoint)
-    try { localStorage.removeItem('navidrome_proxy'); } catch(e) {}
-    if (window.__navidrome) window.__navidrome.proxyUrl = '';
 
     // Set SoulSync proxy to embedded local server (always localhost:8080 on Android)
     try { localStorage.setItem('soulsync_proxy', 'http://localhost:8080'); } catch(e) {}
