@@ -154,21 +154,42 @@ class LocalServer(
                 val url = URL(target)
                 val conn = url.openConnection() as HttpURLConnection
                 conn.connectTimeout = 15000
-                conn.readTimeout = 30000
+                conn.readTimeout = 0
                 conn.instanceFollowRedirects = true
+                val rangeHeader = session.headers?.get("range")
+                if (rangeHeader != null) {
+                    conn.setRequestProperty("Range", rangeHeader)
+                }
                 val respCode = conn.responseCode
+                if (respCode !in 200..299) {
+                    val errBody = try { conn.errorStream?.readBytes() ?: ByteArray(0) } catch (_: Exception) { ByteArray(0) }
+                    conn.disconnect()
+                    return newFixedLengthResponse(Response.Status.lookup(respCode) ?: Response.Status.INTERNAL_ERROR, "text/plain", String(errBody))
+                }
                 val ct = conn.contentType ?: "application/octet-stream"
-                val respBody = if (respCode in 200..299) {
-                    conn.inputStream.readBytes()
+                val contentLength = conn.contentLength.toLong()
+                val upstreamStream = conn.inputStream
+                val wrappedStream = object : java.io.InputStream() {
+                    override fun read(): Int = upstreamStream.read()
+                    override fun read(b: ByteArray, off: Int, len: Int): Int = upstreamStream.read(b, off, len)
+                    override fun available(): Int = upstreamStream.available()
+                    override fun close() {
+                        try { upstreamStream.close() } catch (_: Exception) {}
+                        conn.disconnect()
+                    }
+                }
+                val respStatus = if (respCode == 206) Response.Status.PARTIAL_CONTENT else Response.Status.OK
+                val resp = if (contentLength > 0 && rangeHeader == null) {
+                    newFixedLengthResponse(respStatus, ct, wrappedStream, contentLength)
                 } else {
-                    conn.errorStream?.readBytes() ?: ByteArray(0)
+                    newChunkedResponse(respStatus, ct, wrappedStream)
                 }
-                conn.disconnect()
-                if (respBody.isEmpty()) {
-                    return newFixedLengthResponse(Response.Status.lookup(respCode) ?: Response.Status.INTERNAL_ERROR, ct, "")
-                }
-                val resp = newChunkedResponse(Response.Status.OK, ct, respBody.inputStream())
                 resp.addHeader("Access-Control-Allow-Origin", "*")
+                resp.addHeader("Accept-Ranges", "bytes")
+                if (respCode == 206) {
+                    val contentRange = conn.getHeaderField("Content-Range")
+                    if (contentRange != null) resp.addHeader("Content-Range", contentRange)
+                }
                 return resp
             }
         }

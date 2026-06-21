@@ -281,7 +281,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @JavascriptInterface
-                fun getVersion(): String = "1.1.3"
+                fun getVersion(): String = "1.1.4"
 
                 @JavascriptInterface
                 fun updatePosition(pos: Double) {
