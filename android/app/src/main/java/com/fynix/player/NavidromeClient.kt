@@ -1,5 +1,6 @@
 package com.fynix.player
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -73,7 +74,10 @@ class NavidromeClient(
                 conn.disconnect()
                 val json = JSONObject(String(bytes))
                 json.optJSONObject("subsonic-response")
-            } catch (_: Exception) { null }
+            } catch (e: Exception) {
+                Log.e("Fynix", "Navidrome request failed: endpoint=$endpoint error=${e.message}")
+                null
+            }
         }
 
     suspend fun getPlaylists(): List<NavPlaylist> {
@@ -179,14 +183,15 @@ class NavidromeClient(
         return Triple(artists, albums, songs)
     }
 
-    fun streamUrl(songId: String): String {
-        val params = "u=${URLEncoder.encode(username, "UTF-8")}&p=enc:${hexPassword()}&v=1.12.0&c=fynix&f=json"
+    fun streamUrl(songId: String, format: String = "mp3"): String {
+        val fmtParam = if (format.isNotBlank()) "&format=$format" else ""
+        val params = "u=${URLEncoder.encode(username, "UTF-8")}&p=enc:${hexPassword()}&v=1.12.0&c=fynix$fmtParam"
         return "${server.trimEnd('/')}/rest/stream.view?id=${URLEncoder.encode(songId, "UTF-8")}&$params"
     }
 
     fun coverUrl(coverArt: String, size: Int = 300): String {
         if (coverArt.isBlank()) return ""
-        val params = "u=${URLEncoder.encode(username, "UTF-8")}&p=enc:${hexPassword()}&v=1.12.0&c=fynix&f=json&size=$size"
+        val params = "u=${URLEncoder.encode(username, "UTF-8")}&p=enc:${hexPassword()}&v=1.12.0&c=fynix&size=$size"
         return "${server.trimEnd('/')}/rest/getCoverArt.view?id=${URLEncoder.encode(coverArt, "UTF-8")}&$params"
     }
 }

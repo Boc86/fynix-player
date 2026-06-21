@@ -9,10 +9,10 @@ android {
 
     defaultConfig {
         applicationId = "com.fynix.player"
-        minSdk = 26
+        minSdk = 27
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.1.2"
+        versionCode = 16
+        versionName = "1.1.3"
     }
 
     buildTypes {

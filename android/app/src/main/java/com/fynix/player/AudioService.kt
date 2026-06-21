@@ -12,6 +12,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioManager
 import android.os.Build
+import android.util.Log
 import android.os.Bundle
 import android.os.IBinder
 import android.support.v4.media.MediaMetadataCompat
@@ -36,6 +37,7 @@ class AudioService : android.app.Service() {
         const val ACTION_SHUFFLE_ALL = "shuffle_all"
 
         private var instance: AudioService? = null
+        private var playPendingIntent: PendingIntent? = null
         private var currentTitle = ""
         private var currentArtist = ""
         private var currentAlbum = ""
@@ -47,20 +49,26 @@ class AudioService : android.app.Service() {
         private var currentMediaId = ""
         private var currentTrackNumber = 0
         private var currentAlbumArtist = ""
-
         fun updateNowPlaying(ctx: Context, title: String, artist: String, album: String, coverArt: String, duration: Int, mediaId: String = "", trackNumber: Int = 0, albumArtist: String = "") {
             currentTitle = title
             currentArtist = artist
             currentAlbum = album
             currentCoverUrl = coverArt
             currentDuration = duration
-            currentMediaId = mediaId
             currentTrackNumber = trackNumber
             currentAlbumArtist = albumArtist
-            currentCoverBitmap = null
-            instance?.fetchCoverBitmap()
-            instance?.updateMetadata()
-            instance?.updateNotification()
+            val trackChanged = mediaId != currentMediaId
+            currentMediaId = mediaId
+            instance?.let { srv ->
+                if (trackChanged) {
+                    currentCoverBitmap = null
+                    srv.fetchCoverBitmap()
+                } else {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        srv.updateNotification()
+                    }
+                }
+            }
         }
 
         fun updatePosition(pos: Long) {
@@ -96,6 +104,17 @@ class AudioService : android.app.Service() {
         registerNoisyReceiver()
         setupAudioFocus()
         startForeground(NOTIFICATION_ID, buildNotification())
+        startCoverArtServer()
+    }
+
+    private fun startCoverArtServer() {
+        if (CoverArtServerHolder.server == null) {
+            val srv = CoverArtServer(this)
+            srv.start()
+            CoverArtServerHolder.server = srv
+            CoverArtServerHolder.port = srv.port
+            Log.d("Fynix", "CoverArtServer started on port ${srv.port}")
+        }
     }
 
     private fun setupAudioFocus() {
@@ -156,11 +175,17 @@ class AudioService : android.app.Service() {
             override fun onSkipToNext() { dispatchAction(ACTION_NEXT) }
             override fun onSkipToPrevious() { dispatchAction(ACTION_PREV) }
             override fun onPlayFromMediaId(mediaId: String, extras: Bundle?) {
+                Log.d("Fynix", "onPlayFromMediaId: mediaId=$mediaId")
                 if (mediaId == "shuffle_all") {
-                    Intent(this@AudioService, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        putExtra(EXTRA_ACTION, ACTION_SHUFFLE_ALL)
-                    }.let { startActivity(it) }
+                    Log.d("Fynix", "onPlayFromMediaId: shuffle_all")
+                    val pi = PendingIntent.getActivity(this@AudioService, 9999,
+                        Intent(this@AudioService, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            putExtra(EXTRA_ACTION, ACTION_SHUFFLE_ALL)
+                        },
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    try { pi.send() } catch (e: Exception) { Log.e("Fynix", "shuffle PI send failed: ${e.message}") }
                     return
                 }
                 val delim = mediaId.indexOf('|')
@@ -174,17 +199,36 @@ class AudioService : android.app.Service() {
                 } else {
                     Triple(mediaId, "", "")
                 }
+                Log.d("Fynix", "onPlayFromMediaId: parsed songId=$songId type=$parentType pid=$parentId")
                 val cb = MainActivity.playMediaCallback
+                Log.d("Fynix", "onPlayFromMediaId: playMediaCallback is ${if (cb != null) "SET" else "NULL"}")
                 if (cb != null) {
-                    cb(songId, parentType, parentId)
+                    try {
+                        cb(songId, parentType, parentId)
+                        Log.d("Fynix", "onPlayFromMediaId: callback invoked OK")
+                    } catch (e: Exception) {
+                        Log.e("Fynix", "onPlayFromMediaId: callback threw: ${e.message}")
+                    }
                 } else {
-                    Intent(this@AudioService, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        putExtra(EXTRA_ACTION, ACTION_PLAY_MEDIA)
-                        putExtra(BrowserService.EXTRA_MEDIA_ID, songId)
-                        putExtra(BrowserService.EXTRA_PARENT_TYPE, parentType)
-                        putExtra(BrowserService.EXTRA_PARENT_ID, parentId)
-                    }.let { startActivity(it) }
+                    Log.d("Fynix", "onPlayFromMediaId: no callback, saving to prefs")
+                    getSharedPreferences("fynix_playback", MODE_PRIVATE).edit().apply {
+                        putString("pending_media_id", songId)
+                        putString("pending_parent_type", parentType)
+                        putString("pending_parent_id", parentId)
+                        apply()
+                    }
+                    Log.d("Fynix", "onPlayFromMediaId: sending PendingIntent")
+                    val pi = PendingIntent.getActivity(this@AudioService, System.identityHashCode(mediaId) and 0xFFFF,
+                        Intent(this@AudioService, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            putExtra(EXTRA_ACTION, ACTION_PLAY_MEDIA)
+                            putExtra(BrowserService.EXTRA_MEDIA_ID, songId)
+                            putExtra(BrowserService.EXTRA_PARENT_TYPE, parentType)
+                            putExtra(BrowserService.EXTRA_PARENT_ID, parentId)
+                        },
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    try { pi.send() } catch (e: Exception) { Log.e("Fynix", "PendingIntent.send failed: ${e.message}") }
                 }
             }
             override fun onPlayFromSearch(query: String, extras: Bundle?) {
@@ -192,11 +236,15 @@ class AudioService : android.app.Service() {
                 if (cb != null) {
                     cb("", "", "")
                 }
-                Intent(this@AudioService, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    putExtra(EXTRA_ACTION, "search")
-                    putExtra("query", query)
-                }.let { startActivity(it) }
+                val pi = PendingIntent.getActivity(this@AudioService, 9998,
+                    Intent(this@AudioService, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        putExtra(EXTRA_ACTION, "search")
+                        putExtra("query", query)
+                    },
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                try { pi.send() } catch (e: Exception) { Log.e("Fynix", "search PI send failed: ${e.message}") }
             }
         })
         mediaSession.isActive = true
@@ -208,11 +256,22 @@ class AudioService : android.app.Service() {
         if (cb != null) {
             cb(action)
         } else {
-            val intent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(EXTRA_ACTION, action)
+            getSharedPreferences("fynix_playback", MODE_PRIVATE).edit().apply {
+                putString("pending_action", action)
+                apply()
             }
-            startActivity(intent)
+            try {
+                val pi = PendingIntent.getActivity(this, action.hashCode() and 0xFFFF,
+                    Intent(this, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        putExtra(EXTRA_ACTION, action)
+                    },
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                pi.send()
+            } catch (e: Exception) {
+                Log.e("Fynix", "dispatchAction PendingIntent.send failed: ${e.message}")
+            }
         }
     }
 
@@ -229,18 +288,37 @@ class AudioService : android.app.Service() {
     }
 
     private fun fetchCoverBitmap() {
-        if (currentCoverUrl.isBlank()) return
+        val coverUrl = currentCoverUrl
+        val targetMediaId = currentMediaId
+        Log.d("Fynix", "fetchCoverBitmap: url=$coverUrl for mid=$targetMediaId")
         Thread {
             try {
-                val url = URL(currentCoverUrl)
-                val bytes = url.openStream().use { it.readBytes() }
-                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                if (bitmap != null) {
-                    val scaled = Bitmap.createScaledBitmap(bitmap, 256, 256, true)
-                    currentCoverBitmap = scaled
-                    android.os.Handler(mainLooper).post { updateNotification() }
+                if (coverUrl.isNotBlank()) {
+                    val url = URL(coverUrl)
+                    val conn = url.openConnection()
+                    conn.connectTimeout = 5000
+                    conn.readTimeout = 10000
+                    val bytes = conn.getInputStream().use { it.readBytes() }
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bitmap != null) {
+                        val scaled = Bitmap.createScaledBitmap(bitmap, 256, 256, true)
+                        currentCoverBitmap = scaled
+                        Log.d("Fynix", "fetchCoverBitmap: success, ${bytes.size} bytes for mid=$targetMediaId")
+                    } else {
+                        Log.w("Fynix", "fetchCoverBitmap: bitmap decode failed, ${bytes.size} bytes")
+                    }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.e("Fynix", "fetchCoverBitmap: failed: ${e.message}")
+            }
+            android.os.Handler(mainLooper).post {
+                if (currentMediaId == targetMediaId) {
+                    updateMetadata()
+                    updateNotification()
+                } else {
+                    Log.d("Fynix", "fetchCoverBitmap: stale (current mid=${currentMediaId} != target=$targetMediaId)")
+                }
+            }
         }.start()
     }
 
@@ -255,6 +333,7 @@ class AudioService : android.app.Service() {
             .putLong(MediaMetadataCompat.METADATA_KEY_TRACK_NUMBER, currentTrackNumber.toLong())
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ARTIST, currentAlbumArtist.ifEmpty { currentArtist })
         currentCoverBitmap?.let { builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it) }
+        Log.d("Fynix", "updateMetadata: title=$currentTitle artist=$currentArtist album=$currentAlbum duration=${currentDuration}s hasBitmap=${currentCoverBitmap != null} artUri=$currentCoverUrl")
         mediaSession.setMetadata(builder.build())
     }
 
@@ -334,10 +413,6 @@ class AudioService : android.app.Service() {
     override fun onDestroy() {
         instance = null
         noisyReceiver?.let { unregisterReceiver(it) }
-        if (MediaSessionHolder.session != null) {
-            MediaSessionHolder.session = null
-            mediaSession.release()
-        }
         super.onDestroy()
     }
 }
