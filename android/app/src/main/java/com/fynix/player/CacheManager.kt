@@ -1,6 +1,7 @@
 package com.fynix.player
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -79,6 +80,7 @@ class CacheManager(private val context: Context) {
     }
 
     fun cacheTrack(trackId: String, streamUrl: String, title: String, artist: String, album: String, duration: Int = 0, onProgress: ((Int) -> Unit)? = null) {
+        Log.d("Fynix", "CacheManager.cacheTrack: id=$trackId url=$streamUrl")
         scope.launch {
             try {
                 val url = URL(streamUrl)
@@ -129,7 +131,9 @@ class CacheManager(private val context: Context) {
                 )
                 saveManifest(entries)
                 _evictIfNeeded()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.e("Fynix", "CacheManager.cacheTrack error: ${e.message}")
+            }
         }
     }
 

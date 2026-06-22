@@ -676,7 +676,7 @@
   }
 
   function getAppVersion() {
-    return window.AndroidBridge?.getVersion?.() || '1.2.0'
+    return window.AndroidBridge?.getVersion?.() || '1.2.1'
   }
 
   // --- Offline Cache ---
@@ -689,6 +689,7 @@
       arr.forEach(t => { _cachedTracks[t.trackId] = t })
     } catch (_) {}
   }
+  window._refreshCachedTracks = _refreshCachedTracks
 
   function _isCached(trackId) { return !!_cachedTracks[trackId] }
 
@@ -697,9 +698,10 @@
   }
 
   function cacheTrack(track) {
+    console.log('cacheTrack called: id=' + (track?.id || 'none') + ' caching=' + _cachingTracks[track?.id] + ' isCached=' + _isCached(track?.id))
     if (!window.AndroidBridge || _cachingTracks[track.id] || _isCached(track.id)) return
     _cachingTracks[track.id] = true
-    let url = _origStreamUrl ? _origStreamUrl(track.id) : navidrome.streamUrl(track.id)
+    let url = navidrome.streamUrl(track.id)
     url = url.replace(/format=[^&]+/, 'format=mp3')
     if (url.indexOf('format=') === -1) {
       url += (url.includes('?') ? '&' : '?') + 'format=mp3'
@@ -717,7 +719,15 @@
           clearInterval(poll)
           delete _cachingTracks[track.id]
           _refreshCachedTracks()
-          _updateCacheUI()
+          ;(function(id) {
+            const el = document.querySelector('.cache-btn[data-track-id="' + id + '"]')
+            if (el) {
+              el.classList.remove('caching')
+              el.textContent = '\u2713'
+              el.title = 'Cached'
+              el.style.opacity = '1'
+            }
+          })(track.id)
         }
       } catch (_) {}
     }, 1000)
@@ -2404,8 +2414,8 @@
         break
       }
       case 'equalizer': {
-        const bands = ['60Hz', '170Hz', '310Hz', '600Hz', '1kHz', '3kHz', '6kHz', '12kHz', '14kHz', '16kHz']
-        const eqPresets = {
+        let bands = ['60Hz', '170Hz', '310Hz', '600Hz', '1kHz', '3kHz', '6kHz', '12kHz', '14kHz', '16kHz']
+        let eqPresets = {
           flat: bands.map(() => 0),
           rock: [5, 4, 3, 2, 1, 2, 3, 4, 3, 2],
           pop: [-1, 3, 4, 5, 3, 1, 0, 0, 0, 0],
@@ -2414,8 +2424,27 @@
           bass: [7, 6, 4, 2, 0, -1, -2, -3, -4, -5],
           vocals: [-1, -1, 0, 2, 4, 4, 3, 2, 1, 1]
         }
-        const eqVals = s.equalizer || bands.map(() => 0)
-        const eqPresetName = s.eqPreset || 'custom'
+        let eqVals = s.equalizer || bands.map(() => 0)
+        let eqPresetName = s.eqPreset || 'custom'
+        let isNativeEq = false
+        let eqRange = 12
+        if (window.AndroidBridge?.nativeGetEqInfo) {
+          try {
+            const info = JSON.parse(window.AndroidBridge.nativeGetEqInfo())
+            if (info.bands && info.bands.length > 0) {
+              bands = info.bands.map(b => b.frequency >= 1000
+                ? (b.frequency / 1000).toFixed(1).replace('.0', '') + 'kHz'
+                : b.frequency + 'Hz')
+              eqVals = info.gains && info.gains.length === bands.length ? info.gains : bands.map(() => 0)
+              eqPresets = { flat: bands.map(() => 0) }
+              eqPresetName = 'custom'
+              isNativeEq = true
+            }
+            if (info.bandLevelRange && info.bandLevelRange.length > 1) {
+              eqRange = Math.min(Math.abs(info.bandLevelRange[0]), Math.abs(info.bandLevelRange[1]), 12)
+            }
+          } catch (_) {}
+        }
         const eqPresetOpts = {}
         Object.keys(eqPresets).forEach(name => { eqPresetOpts[name] = name.charAt(0).toUpperCase() + name.slice(1) })
         eqPresetOpts.custom = 'Custom'
@@ -2423,12 +2452,12 @@
           <form id="settings-form" class="settings-form" onsubmit="return false">
             <section class="settings-section">
               <h3>Equalizer</h3>
-              <p class="settings-desc">Tone adjustment (±12dB)</p>
+              <p class="settings-desc">Tone adjustment (±${isNativeEq ? '15' : '12'}dB)${isNativeEq ? ' (device bands)' : ''}</p>
               <label class="checkbox-row">
                 <input type="checkbox" id="s-eq-enabled" ${s.eqEnabled ? 'checked' : ''}>
                 Enable Equalizer
               </label>
-              <div class="eq-presets">
+              <div class="eq-presets"${isNativeEq ? ' style="display:none"' : ''}>
                 <span class="settings-field-label">Preset</span>
                 ${_customSelect('s-eq-preset', eqPresetOpts, eqPresetName)}
               </div>
@@ -2436,7 +2465,7 @@
                 ${bands.map((band, i) => `
                   <div class="eq-band">
                     <span class="eq-label">${band}</span>
-                    <input type="range" class="eq-slider" data-idx="${i}" min="-12" max="12" step="1" value="${eqVals[i] || 0}" orient="vertical">
+                    <input type="range" class="eq-slider" data-idx="${i}" min="${-eqRange}" max="${eqRange}" step="1" value="${eqVals[i] || 0}" orient="vertical">
                     <span class="eq-value">${eqVals[i] || 0}dB</span>
                   </div>
                 `).join('')}

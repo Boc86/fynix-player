@@ -110,6 +110,13 @@ class MusicPlayer {
   }
 
   setEq(gains) {
+    if (this._native) {
+      if (window.AndroidBridge?.nativeSetEqGains) {
+        window.AndroidBridge.nativeSetEqGains(JSON.stringify(gains))
+        window.AndroidBridge.nativeSetEqEnabled(true)
+      }
+      return
+    }
     this._eqEnabled = true
     this._initEq()
     if (!this._audioCtx) return
@@ -121,6 +128,10 @@ class MusicPlayer {
   }
 
   disableEq() {
+    if (this._native) {
+      window.AndroidBridge?.nativeSetEqEnabled(false)
+      return
+    }
     this._eqEnabled = false
   }
 
@@ -308,6 +319,7 @@ class MusicPlayer {
         }))
       }
       this._emit('loaded', this.getState())
+      this._autoCache()
       return
     }
     this.audio.src = track.streamUrl || ''
@@ -334,8 +346,12 @@ class MusicPlayer {
   }
 
   _autoCache() {
-    if (!window.AndroidBridge || !window.cacheTrack) return
+    if (!window.AndroidBridge || !window.cacheTrack) {
+      console.log('_autoCache: skip, bridge=' + !!window.AndroidBridge + ' cacheTrack=' + !!window.cacheTrack)
+      return
+    }
     const track = this.queue[this.currentIndex]
+    console.log('_autoCache: caching current idx=' + this.currentIndex + ' id=' + (track?.id || 'none'))
     if (track) window.cacheTrack(track)
     const next = this.queue[this.currentIndex + 1]
     if (next) window.cacheTrack(next)

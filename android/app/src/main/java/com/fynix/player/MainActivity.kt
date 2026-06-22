@@ -17,6 +17,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.WebSettings
 import android.util.Log
+import org.json.JSONArray
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -318,7 +319,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @JavascriptInterface
-                fun getVersion(): String = "1.2.0"
+                fun getVersion(): String = "1.2.1"
 
                 @JavascriptInterface
                 fun updatePosition(pos: Double) {
@@ -337,7 +338,9 @@ class MainActivity : AppCompatActivity() {
                         val coverUrl = obj.optString("coverUrl", obj.optString("coverArt", ""))
                         val duration = obj.optInt("duration", 0)
                         ExoPlayerHolder.playStream(id, streamUrl, title, artist, album, coverUrl, duration)
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        Log.e("Fynix", "playStream bridge error: ${e.message}")
+                    }
                 }
 
                 @JavascriptInterface
@@ -353,6 +356,27 @@ class MainActivity : AppCompatActivity() {
                 @JavascriptInterface
                 fun nativeSetVolume(vol: Float) {
                     ExoPlayerHolder.setVolume(vol)
+                }
+
+                @JavascriptInterface
+                fun nativeGetEqInfo(): String {
+                    return ExoPlayerHolder.getEqInfo()
+                }
+
+                @JavascriptInterface
+                fun nativeSetEqGains(json: String) {
+                    try {
+                        val arr = JSONArray(json)
+                        val gains = FloatArray(arr.length()) { arr.getDouble(it).toFloat() }
+                        ExoPlayerHolder.setEqGains(gains)
+                    } catch (e: Exception) {
+                        Log.e("Fynix", "nativeSetEqGains error: ${e.message}")
+                    }
+                }
+
+                @JavascriptInterface
+                fun nativeSetEqEnabled(enabled: Boolean) {
+                    ExoPlayerHolder.setEqEnabled(enabled)
                 }
 
                 @JavascriptInterface
@@ -577,6 +601,16 @@ class MainActivity : AppCompatActivity() {
         };
         p._onNativeError = function(msg) {
             p._emit('error', msg);
+        };
+    }
+
+    // Re-init cache detection now that bridge is available
+    if (window._refreshCachedTracks) window._refreshCachedTracks();
+    if (window.navidrome) {
+        var _origStreamUrl = navidrome.streamUrl.bind(navidrome);
+        navidrome.streamUrl = function(id) {
+            try { var cachedUrl = AndroidBridge.getCachedUrl(id); if (cachedUrl) return cachedUrl; } catch(e) {}
+            return _origStreamUrl(id);
         };
     }
 })();

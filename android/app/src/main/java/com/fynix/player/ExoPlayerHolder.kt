@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -29,6 +31,9 @@ object ExoPlayerHolder {
     var onTrackError: ((String) -> Unit)? = null
 
     private var currentStreamId = ""
+    private var equalizer: android.media.audiofx.Equalizer? = null
+    private var eqEnabled = false
+    private var eqGains: FloatArray? = null
 
     fun initialize(ctx: Context) {
         if (exoPlayer != null) return
@@ -42,6 +47,7 @@ object ExoPlayerHolder {
                 true
             )
         }
+        loadEqPrefs()
         Log.d("Fynix", "ExoPlayerHolder: initialized")
     }
 
@@ -73,6 +79,8 @@ object ExoPlayerHolder {
             player.clearMediaItems()
             player.setMediaItem(mediaItem)
             player.prepare()
+            player.play()
+            initEqualizer()
             Log.d("Fynix", "ExoPlayerHolder: playing id=$id url=$streamUrl")
         }
     }
@@ -179,10 +187,105 @@ object ExoPlayerHolder {
     fun release() {
         stopPositionUpdates()
         handler.post {
+            equalizer?.release()
+            equalizer = null
             exoPlayer?.release()
             exoPlayer = null
         }
         Log.d("Fynix", "ExoPlayerHolder: released")
+    }
+
+    fun initEqualizer() {
+        val player = exoPlayer ?: return
+        try {
+            equalizer?.release()
+            equalizer = android.media.audiofx.Equalizer(0, player.audioSessionId).apply {
+                enabled = eqEnabled
+                if (eqGains != null) {
+                    val numBands = numberOfBands.toInt()
+                    for (i in 0 until minOf(numBands, eqGains!!.size)) {
+                        val millibels = (eqGains!![i] * 100).toInt().coerceIn(-1500, 1500).toShort()
+                        setBandLevel(i.toShort(), millibels)
+                    }
+                }
+                Log.d("Fynix", "ExoPlayerHolder: equalizer initialized, bands=${numberOfBands} enabled=$eqEnabled")
+            }
+        } catch (e: Exception) {
+            Log.e("Fynix", "ExoPlayerHolder: initEqualizer error: ${e.message}")
+        }
+    }
+
+    fun setEqEnabled(enabled: Boolean) {
+        eqEnabled = enabled
+        handler.post { equalizer?.enabled = enabled }
+        saveEqPrefs()
+    }
+
+    fun setEqGains(gains: FloatArray) {
+        eqGains = gains
+        eqEnabled = true
+        handler.post {
+            val eq = equalizer ?: return@post
+            val numBands = eq.numberOfBands.toInt()
+            for (i in 0 until minOf(numBands, gains.size)) {
+                val millibels = (gains[i] * 100).toInt().coerceIn(-1500, 1500).toShort()
+                try { eq.setBandLevel(i.toShort(), millibels) } catch (_: Exception) {}
+            }
+            eq.enabled = true
+        }
+        saveEqPrefs()
+    }
+
+    fun getEqInfo(): String {
+        val eq = equalizer
+        if (eq == null) return """{"bands":[],"enabled":false,"gains":[],"bandLevelRange":[-15,15]}"""
+        return try {
+            val numBands = eq.numberOfBands.toInt()
+            val bands = JSONArray()
+            val gainsArr = JSONArray()
+            for (i in 0 until numBands) {
+                val centerHz = eq.getCenterFreq(i.toShort()) / 1000f
+                bands.put(JSONObject().apply {
+                    put("index", i)
+                    put("frequency", centerHz.toInt())
+                })
+                gainsArr.put(eq.getBandLevel(i.toShort()) / 100f)
+            }
+            val range = eq.bandLevelRange
+            val minDb = (if (range.size > 0) range[0] else -1500) / 100f
+            val maxDb = (if (range.size > 1) range[1] else 1500) / 100f
+            JSONObject().apply {
+                put("bands", bands)
+                put("enabled", eqEnabled)
+                put("gains", gainsArr)
+                put("bandLevelRange", JSONArray(listOf(minDb, maxDb)))
+            }.toString()
+        } catch (e: Exception) {
+            Log.e("Fynix", "ExoPlayerHolder: getEqInfo error: ${e.message}")
+            """{"bands":[],"enabled":false,"gains":[],"bandLevelRange":[-15,15]}"""
+        }
+    }
+
+    private fun loadEqPrefs() {
+        val prefs = appContext?.getSharedPreferences("fynix_eq", Context.MODE_PRIVATE) ?: return
+        eqEnabled = prefs.getBoolean("eq_enabled", false)
+        val gainsStr = prefs.getString("eq_gains", null)
+        if (gainsStr != null) {
+            eqGains = gainsStr.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray()
+        }
+    }
+
+    private fun saveEqPrefs() {
+        val prefs = appContext?.getSharedPreferences("fynix_eq", Context.MODE_PRIVATE) ?: return
+        prefs.edit().apply {
+            putBoolean("eq_enabled", eqEnabled)
+            if (eqGains != null) {
+                putString("eq_gains", eqGains!!.joinToString(","))
+            } else {
+                remove("eq_gains")
+            }
+            apply()
+        }
     }
 
     private fun startPositionUpdates() {
