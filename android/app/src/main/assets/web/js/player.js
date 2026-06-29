@@ -10,6 +10,9 @@ class MusicPlayer {
     this.listeners = {}
     this._nativeState = { playing: false, currentTime: 0, duration: 0 }
     this._saveTimer = null
+    this._restored = false
+    this._restoredPlaying = false
+    this._savedCurrentTime = 0
 
     if (!this._native) {
       this.audio = new Audio()
@@ -18,7 +21,6 @@ class MusicPlayer {
     }
     if (!this._native) {
       this.audio.crossOrigin = 'anonymous'
-      this._restored = false
       this._fading = false
       this._formatRetries = {}
       this._eqEnabled = false
@@ -42,7 +44,6 @@ class MusicPlayer {
       this._gapless = true
       this.audio.addEventListener('timeupdate', () => {
         this._emit('timeupdate', this.getState())
-        this._scheduleSave()
         this._checkPreload()
       })
       this.audio.addEventListener('ended', () => this._onEnded())
@@ -50,12 +51,14 @@ class MusicPlayer {
       this.audio.addEventListener('play', () => this._emit('play', this.getState()))
       this.audio.addEventListener('pause', () => {
         this._emit('pause', this.getState())
-        this._saveState()
       })
       this.audio.addEventListener('error', (e) => this._onError(e))
-      this._restoreState()
-      window.addEventListener('beforeunload', () => this._saveState())
     }
+    // Schedule state save on every emitted timeupdate (works in both modes)
+    this.on('timeupdate', () => this._scheduleSave())
+    this.on('pause', () => this._saveState())
+    this._restoreState()
+    window.addEventListener('beforeunload', () => this._saveState())
   }
 
   _onError(e) {
@@ -181,7 +184,8 @@ class MusicPlayer {
             track: t.track, coverArt: t.coverArt, streamUrl: t.streamUrl, coverUrl: t.coverUrl
           })),
           currentIndex: this.currentIndex,
-          currentTime: 0, playing: false,
+          currentTime: this._nativeState?.currentTime || 0,
+          playing: !!this._nativeState?.playing,
           repeat: this.repeat, shuffle: this.shuffle,
           volume: 1, timestamp: Date.now()
         }
@@ -232,8 +236,7 @@ class MusicPlayer {
       this.currentIndex = data.currentIndex >= 0 && data.currentIndex < data.queue.length ? data.currentIndex : 0
       this.repeat = data.repeat || false
       this.shuffle = data.shuffle || false
-      if (this._native) return
-      if (data.volume !== undefined) this.audio.volume = data.volume
+      if (data.volume !== undefined && !this._native) this.audio.volume = data.volume
       this._restored = true
       this._restoredPlaying = !!data.playing
       this._savedCurrentTime = data.currentTime || 0
@@ -307,18 +310,51 @@ class MusicPlayer {
     const track = this.queue[this.currentIndex]
     if (!track) return
     if (this._native) {
-      if (window.AndroidBridge) {
-        window.AndroidBridge.playStream(JSON.stringify({
-          id: track.id || '',
-          streamUrl: track.streamUrl || '',
-          title: track.title || track.name || 'Unknown',
-          artist: track.artist || track.artist_name || track.albumArtist || '',
-          album: track.album || track.albumName || '',
-          coverUrl: track.coverUrl || track.coverArt || '',
-          duration: track.duration || 0
+      if (window.AndroidBridge && this.queue.length > 0) {
+        const playOne = (t) => window.AndroidBridge.playStream(JSON.stringify({
+          id: t.id || '',
+          streamUrl: t.streamUrl || '',
+          title: t.title || t.name || 'Unknown',
+          artist: t.artist || t.artist_name || t.albumArtist || '',
+          album: t.album || t.albumName || '',
+          coverUrl: t.coverUrl || t.coverArt || '',
+          duration: t.duration || 0
         }))
+        if (this.queue.length > 1 && window.AndroidBridge.nativeSetQueueFromJs) {
+          // Push full queue so Android Auto MediaSession queue + gapless reflect it
+          const payload = {
+            currentIndex: this.currentIndex,
+            tracks: this.queue.map(t => ({
+              id: t.id || '',
+              streamUrl: t.streamUrl || '',
+              title: t.title || t.name || 'Unknown',
+              artist: t.artist || t.artist_name || t.albumArtist || '',
+              album: t.album || t.albumName || '',
+              coverUrl: t.coverUrl || t.coverArt || '',
+              duration: t.duration || 0
+            }))
+          }
+          try { window.AndroidBridge.nativeSetQueueFromJs(JSON.stringify(payload)) } catch (_) { playOne(track) }
+        } else {
+          playOne(track)
+        }
       }
       this._emit('loaded', this.getState())
+      if (this._restored) {
+        const savedTime = this._savedCurrentTime || 0
+        const wasPlaying = this._restoredPlaying
+        this._restored = false
+        this._savedCurrentTime = 0
+        if (savedTime > 0 && window.AndroidBridge?.nativeSeekTo) {
+          const seekMs = Math.min(Math.round(savedTime * 1000), Math.max(0, ((track.duration || 0) - 1) * 1000))
+          if (!autoplay && !wasPlaying) {
+            this._nativeState = this._nativeState || {}
+            this._nativeState.currentTime = savedTime
+          } else if (seekMs > 0) {
+            setTimeout(() => window.AndroidBridge.nativeSeekTo(seekMs), 350)
+          }
+        }
+      }
       this._autoCache()
       return
     }
@@ -395,6 +431,22 @@ class MusicPlayer {
       return
     }
     this.audio.currentTime = time
+  }
+
+  _onNativeMediaTransition(posSec, durSec, mediaIndex) {
+    if (!this._native) return
+    if (mediaIndex !== this.currentIndex) {
+      // ExoPlayer auto-advanced past our last-known currentIndex;
+      // sync the JS-side queue pointer so next/prev/UI reflect native state.
+      if (mediaIndex >= 0 && mediaIndex < this.queue.length) {
+        this.currentIndex = mediaIndex
+      }
+    }
+    this._nativeState = this._nativeState || {}
+    this._nativeState.currentTime = posSec
+    this._nativeState.duration = durSec
+    this._emit('loaded', this.getState())
+    this._emit('timeupdate', this.getState())
   }
 
   setVolume(v) {

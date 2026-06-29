@@ -34,6 +34,9 @@ object ExoPlayerHolder {
     private var equalizer: android.media.audiofx.Equalizer? = null
     private var eqEnabled = false
     private var eqGains: FloatArray? = null
+    /** Signatures of recent queue builds used to dedupe noisy JS pushes. */
+    private var lastQueueSig: String? = null
+    private var lastQueueIndex: Int = -1
 
     fun initialize(ctx: Context) {
         if (exoPlayer != null) return
@@ -54,35 +57,127 @@ object ExoPlayerHolder {
     fun isInitialized(): Boolean = exoPlayer != null
 
     fun playStream(id: String, streamUrl: String, title: String, artist: String, album: String, coverUrl: String, duration: Int) {
+        val item = MediaItem.fromUri(streamUrl)
+        val singMeta = SongMeta(id, title, artist, album, coverUrl, duration)
+        playMediaItems(listOf(item), 0, singMeta)
+    }
+
+    /**
+     * Build an ExoPlayer playlist from the JS-side queue. Used when the JS player has
+     * the authoritative queue (in-app taps, search, random, etc.); the queue is pushed
+     * to the native player so the Android Auto MediaSession and Auto queue reflect the
+     * full song list rather than a single MediaItem.
+     */
+    fun playQueueFromJs(queueJson: String) {
+        Log.d("Fynix", "playQueueFromJs invoked, payload bytes=${queueJson.length}")
+        scope.launch {
+            try {
+                val obj = org.json.JSONObject(queueJson)
+                val tracksArr = obj.optJSONArray("tracks") ?: return@launch
+                val startIndex = obj.optInt("currentIndex", obj.optInt("startIndex", 0))
+                if (tracksArr.length() == 0) return@launch
+                val items = ArrayList<MediaItem>(tracksArr.length())
+                val metas = ArrayList<SongMeta>(tracksArr.length())
+                for (i in 0 until tracksArr.length()) {
+                    val t = tracksArr.optJSONObject(i) ?: continue
+                    val id = t.optString("id", "")
+                    val streamUrl = t.optString("streamUrl", "")
+                    if (id.isBlank() || streamUrl.isBlank()) continue
+                    val title = t.optString("title", t.optString("name", "Unknown"))
+                    val artist = t.optString("artist", t.optString("artist_name", ""))
+                    val album = t.optString("album", t.optString("albumName", ""))
+                    val coverUrl = t.optString("coverUrl", t.optString("coverArt", ""))
+                    val duration = t.optInt("duration", 0)
+                    items.add(MediaItem.fromUri(streamUrl))
+                    metas.add(SongMeta(id, title, artist, album, coverUrl, duration))
+                }
+                if (items.isEmpty()) return@launch
+                val startIdx = startIndex.coerceIn(0, items.size - 1)
+                val meta = metas[startIdx]
+                withContext(Dispatchers.Main) {
+                    playMediaItems(items, startIdx, meta)
+                }
+            } catch (e: Exception) {
+                Log.e("Fynix", "ExoPlayerHolder: playQueueFromJs error: ${e.message}")
+            }
+        }
+    }
+
+    private data class SongMeta(
+        val id: String,
+        val title: String,
+        val artist: String,
+        val album: String,
+        val coverUrl: String,
+        val duration: Int
+    )
+
+    private fun playMediaItems(items: List<MediaItem>, startIndex: Int, nowPlaying: SongMeta) {
         val ctx = appContext ?: return
         val player = exoPlayer
         if (player == null) {
             Log.e("Fynix", "ExoPlayerHolder: not initialized")
             return
         }
-        currentStreamId = id
-        val coverArtUrl = if (coverUrl.startsWith("http")) coverUrl else {
-            if (coverUrl.isNotBlank()) navidrome?.coverUrl(coverUrl, 300) ?: "" else ""
+        if (items.isEmpty()) return
+        currentStreamId = nowPlaying.id
+        val coverArtUrl = if (nowPlaying.coverUrl.startsWith("http")) nowPlaying.coverUrl else {
+            if (nowPlaying.coverUrl.isNotBlank()) navidrome?.coverUrl(nowPlaying.coverUrl, 300) ?: "" else ""
         }
         AudioService.updateNowPlaying(
             ctx,
-            title = title,
-            artist = artist,
-            album = album,
+            title = nowPlaying.title,
+            artist = nowPlaying.artist,
+            album = nowPlaying.album,
             coverArt = coverArtUrl,
-            duration = duration,
-            mediaId = id
+            duration = nowPlaying.duration,
+            mediaId = nowPlaying.id
         )
-        val mediaItem = MediaItem.fromUri(streamUrl)
+        val startIdx = startIndex.coerceIn(0, items.size - 1)
         handler.post {
+            val signature = computeQueueSignature(items, startIdx)
+            val sameQueue = signature.first == lastQueueSig
+            val onlyAdvanced = signature.first == lastQueueSig &&
+                exoPlayer?.mediaItemCount == items.size &&
+                exoPlayer?.currentMediaItemIndex == startIdx
+            if (sameQueue && exoPlayer?.mediaItemCount == items.size) {
+                // The JS-side queue didn't change in shape. Just seek to the right
+                // MediaItem position to avoid re-buffering the whole playlist.
+                if (exoPlayer?.currentMediaItemIndex != startIdx) {
+                    exoPlayer?.seekTo(startIdx, 0L)
+                }
+                exoPlayer?.playWhenReady = true
+                Log.d(
+                    "Fynix",
+                    "ExoPlayerHolder: queue unchanged, skip reload, seek idx=$startIdx (sig=${signature.first.length})"
+                )
+                return@post
+            }
+            lastQueueSig = signature.first
+            lastQueueIndex = startIdx
             player.stop()
             player.clearMediaItems()
-            player.setMediaItem(mediaItem)
+            player.setMediaItems(items, startIdx, 0L)
             player.prepare()
             player.play()
             initEqualizer()
-            Log.d("Fynix", "ExoPlayerHolder: playing id=$id url=$streamUrl")
+            Log.d(
+                "Fynix",
+                "ExoPlayerHolder: playMediaItems id=${nowPlaying.id} queue=${items.size} start=$startIdx sig=${signature.first.length} hash=${signature.second}"
+            )
         }
+    }
+
+    private fun computeQueueSignature(items: List<MediaItem>, startIndex: Int): Pair<String, Int> {
+        // sig ignores startIndex so queue rebuilds only happen when item URIs change
+        val sb = StringBuilder()
+        for (i in items.indices) {
+            if (i > 0) sb.append('|')
+            sb.append(items[i].localConfiguration?.uri ?: "")
+        }
+        var h = 0
+        for (c in sb) h = (h * 31 + c.code) and 0x7FFFFFFF
+        return sb.toString() to h
     }
 
     fun handlePlayMediaId(mediaId: String) {
@@ -105,41 +200,58 @@ object ExoPlayerHolder {
                     Log.e("Fynix", "ExoPlayerHolder: navidrome not configured")
                     return@launch
                 }
-                val streamUrl = n.streamUrl(songId)
-                var title = ""
-                var artist = ""
-                var album = ""
-                var coverArt = ""
-                var duration = 0
-                when (parentType) {
+                var nowPlaying: SongMeta? = null
+                var startIndex = 0
+                val items: List<MediaItem> = when (parentType) {
                     "album" -> {
                         val (albumData, songs) = n.getAlbum(parentId)
-                        val song = songs.find { it.id == songId }
-                        if (song != null) {
-                            title = song.title; artist = song.artist
-                            album = song.album; coverArt = song.coverArt; duration = song.duration
+                        songs.forEachIndexed { idx, s ->
+                            if (s.id == songId) {
+                                startIndex = idx
+                                nowPlaying = SongMeta(
+                                    s.id, s.title, s.artist, s.album,
+                                    s.coverArt.ifBlank { albumData?.coverArt ?: "" },
+                                    s.duration
+                                )
+                            }
                         }
-                        albumData?.let { if (coverArt.isBlank()) coverArt = it.coverArt }
+                        songs.map { s -> MediaItem.fromUri(n.streamUrl(s.id)) }
                     }
                     "playlist" -> {
                         val songs = n.getPlaylist(parentId)
-                        val song = songs.find { it.id == songId }
-                        if (song != null) {
-                            title = song.title; artist = song.artist
-                            album = song.album; coverArt = song.coverArt; duration = song.duration
+                        songs.forEachIndexed { idx, s ->
+                            if (s.id == songId) {
+                                startIndex = idx
+                                nowPlaying = SongMeta(
+                                    s.id, s.title, s.artist, s.album,
+                                    s.coverArt, s.duration
+                                )
+                            }
                         }
+                        songs.map { s -> MediaItem.fromUri(n.streamUrl(s.id)) }
                     }
                     else -> {
                         val song = n.getSong(songId)
                         if (song != null) {
-                            title = song.title; artist = song.artist
-                            album = song.album; coverArt = song.coverArt; duration = song.duration
+                            nowPlaying = SongMeta(
+                                song.id, song.title, song.artist, song.album,
+                                song.coverArt, song.duration
+                            )
+                            listOf(MediaItem.fromUri(n.streamUrl(songId)))
+                        } else {
+                            Log.e("Fynix", "ExoPlayerHolder: cannot resolve songId=$songId")
+                            return@launch
                         }
                     }
                 }
-                val coverUrl = if (coverArt.isNotBlank()) n.coverUrl(coverArt, 300) else ""
+                val meta = nowPlaying ?: run {
+                    Log.e("Fynix", "ExoPlayerHolder: selected song not found in $parentType=$parentId songId=$songId")
+                    return@launch
+                }
+                val coverUrl = if (meta.coverUrl.isNotBlank()) n.coverUrl(meta.coverUrl, 300) else ""
+                val resolved = meta.copy(coverUrl = coverUrl)
                 withContext(Dispatchers.Main) {
-                    playStream(songId, streamUrl, title, artist, album, coverUrl, duration)
+                    playMediaItems(items, startIndex, resolved)
                 }
             } catch (e: Exception) {
                 Log.e("Fynix", "ExoPlayerHolder: handlePlayMediaId error: ${e.message}")
@@ -310,6 +422,12 @@ object ExoPlayerHolder {
         positionRunnable = null
     }
 
+    /**
+     * Callback fired when ExoPlayer's auto-advance moves to the next MediaItem
+     * (only set when using a native playlist, not single-item playback).
+     */
+    var onMediaItemTransition: ((positionMs: Long, durationMs: Long, mediaIndex: Int) -> Unit)? = null
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             Log.d("Fynix", "ExoPlayerHolder: isPlaying=$isPlaying")
@@ -332,6 +450,17 @@ object ExoPlayerHolder {
                     onTrackEnded?.invoke()
                 }
             }
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // ExoPlayer auto-advanced to a new MediaItem in the native playlist.
+            // Push the new position to the JS-side state so the UI follows along.
+            val p = exoPlayer ?: return
+            val pos = p.currentPosition
+            val dur = if (p.duration > 0) p.duration else 0L
+            val idx = p.currentMediaItemIndex
+            Log.d("Fynix", "ExoPlayerHolder: mediaItemTransition idx=$idx pos=$pos")
+            onMediaItemTransition?.invoke(pos, dur, idx)
         }
 
         override fun onPlayerError(error: PlaybackException) {

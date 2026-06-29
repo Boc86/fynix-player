@@ -83,6 +83,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        ExoPlayerHolder.onMediaItemTransition = { pos, dur, mediaIndex ->
+            if (pageLoaded) {
+                webView.post {
+                    val posSec = pos / 1000.0
+                    val durSec = dur / 1000.0
+                    webView.evaluateJavascript(
+                        "window.player._onNativeMediaTransition($posSec, $durSec, $mediaIndex)", null
+                    )
+                }
+            }
+        }
         mediaActionCallback = { action -> handleMediaAction(action) }
         playMediaCallback = { mediaId, parentType, parentId ->
             if (pageLoaded) {
@@ -319,7 +330,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @JavascriptInterface
-                fun getVersion(): String = "1.2.1"
+                fun getVersion(): String = "1.2.2"
 
                 @JavascriptInterface
                 fun updatePosition(pos: Double) {
@@ -341,6 +352,12 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {
                         Log.e("Fynix", "playStream bridge error: ${e.message}")
                     }
+                }
+
+                @JavascriptInterface
+                fun nativeSetQueueFromJs(json: String) {
+                    Log.d("Fynix", "nativeSetQueueFromJs called, bytes=${json.length}")
+                    ExoPlayerHolder.playQueueFromJs(json)
                 }
 
                 @JavascriptInterface
@@ -602,6 +619,20 @@ class MainActivity : AppCompatActivity() {
         p._onNativeError = function(msg) {
             p._emit('error', msg);
         };
+        if (typeof p._onNativeMediaTransition !== 'function') {
+            p._onNativeMediaTransition = function(posSec, durSec, mediaIndex) {
+                // Sync the JS-side currentIndex from a native MediaItem auto-advance
+                if (p._native && mediaIndex !== p.currentIndex &&
+                    mediaIndex >= 0 && mediaIndex < (p.queue?.length || 0)) {
+                    p.currentIndex = mediaIndex
+                }
+                p._nativeState = p._nativeState || {}
+                p._nativeState.currentTime = posSec
+                p._nativeState.duration = durSec
+                p._emit('loaded', p.getState())
+                p._emit('timeupdate', p.getState())
+            };
+        }
     }
 
     // Re-init cache detection now that bridge is available

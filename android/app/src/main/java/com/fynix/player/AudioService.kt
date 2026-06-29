@@ -110,6 +110,7 @@ class AudioService : android.app.Service() {
     private var noisyReceiver: BroadcastReceiver? = null
     private var audioManager: AudioManager? = null
     private var audioFocusListener: AudioManager.OnAudioFocusChangeListener? = null
+    private var debugReceiver: BroadcastReceiver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -119,6 +120,7 @@ class AudioService : android.app.Service() {
         setupMediaSession()
         registerNoisyReceiver()
         setupAudioFocus()
+        registerDebugReceiver()
         startForeground(NOTIFICATION_ID, buildNotification())
         startCoverArtServer()
     }
@@ -173,13 +175,35 @@ class AudioService : android.app.Service() {
             override fun onPlayFromMediaId(mediaId: String, extras: Bundle?) {
                 Log.d("Fynix", "onPlayFromMediaId: mediaId=$mediaId")
                 if (mediaId == "shuffle_all") {
-                    val cb = MainActivity.mediaActionCallback
-                    if (cb != null) {
-                        try { cb(ACTION_SHUFFLE_ALL) } catch (_: Exception) {}
-                    }
+                    dispatchAction(ACTION_SHUFFLE_ALL)
                     return
                 }
-                ExoPlayerHolder.handlePlayMediaId(mediaId)
+                val (songId, parentType, parentId) = parseMediaIdForAuto(mediaId)
+                Log.d("Fynix", "onPlayFromMediaId parsed: song=$songId type=$parentType pid=$parentId")
+                // Route through MainActivity's playMediaCallback so the JS-side queue
+                // gets populated identically to in-app taps. This keeps JS_player.queue
+                // and ExoPlayer's media items in lock-step so "Next" advances within
+                // the same playlist the user just opened (not a stale shuffled queue).
+                val cb = MainActivity.playMediaCallback
+                if (cb != null) {
+                    try {
+                        cb(songId, parentType, parentId)
+                    } catch (e: Exception) {
+                        Log.e("Fynix", "onPlayFromMediaId: playMediaCallback threw: ${e.message}")
+                        // Fallback to native path so audio still starts
+                        ExoPlayerHolder.handlePlayMediaId(mediaId)
+                    }
+                } else {
+                    // Activity not yet bound; persist so checkPendingFromPrefs fires
+                    // window.playMediaId(…) once MainActivity binds.
+                    getSharedPreferences("fynix_playback", MODE_PRIVATE).edit().apply {
+                        putString("pending_media_id", mediaId)
+                        putString("pending_parent_type", parentType)
+                        putString("pending_parent_id", parentId)
+                        apply()
+                    }
+                    Log.d("Fynix", "onPlayFromMediaId: saved pending mid=$mediaId")
+                }
             }
             override fun onPlayFromSearch(query: String, extras: Bundle?) {
                 val cb = MainActivity.mediaActionCallback
@@ -190,6 +214,26 @@ class AudioService : android.app.Service() {
         })
         mediaSession.isActive = true
         updateMediaSessionState()
+    }
+
+    /**
+     * Parse an AA MediaSession mediaId of the form
+     *   "<songId>|album:<albumId>"
+     *   "<songId>|playlist:<playlistId>"
+     *   "<songId>" (plain track)
+     * into (songId, parentType, parentId).
+     */
+    private fun parseMediaIdForAuto(mediaId: String): Triple<String, String, String> {
+        val delim = mediaId.indexOf('|')
+        if (delim < 0) return Triple(mediaId, "", "")
+        val songId = mediaId.substring(0, delim)
+        val parent = mediaId.substring(delim + 1)
+        val colon = parent.indexOf(':')
+        return if (colon > 0) {
+            Triple(songId, parent.substring(0, colon), parent.substring(colon + 1))
+        } else {
+            Triple(songId, "", "")
+        }
     }
 
     private fun dispatchAction(action: String) {
@@ -340,6 +384,73 @@ class AudioService : android.app.Service() {
         instance = null
         ExoPlayerHolder.release()
         noisyReceiver?.let { unregisterReceiver(it) }
+        debugReceiver?.let { unregisterReceiver(it) }
         super.onDestroy()
+    }
+
+    /**
+     * Debug-only broadcast receiver that lets ADB simulate AA-style plays for testing.
+     *
+     *  adb shell am broadcast -a com.fynix.player.DEBUG_PLAY --es mid 'songId|album:albumId'
+     *  adb shell am broadcast -a com.fynix.player.DEBUG_PLAY --es mid 'songId|playlist:playlistId'
+     *  adb shell am broadcast -a com.fynix.player.DEBUG_PLAY --es mid 'plainSongId'
+     *  adb shell am broadcast -a com.fynix.player.DEBUG_PLAY --es mid 'shuffle_all'
+     *
+     *  adb shell am broadcast -a com.fynix.player.DEBUG_ACT --es cmd 'next'
+     *  adb shell am broadcast -a com.fynix.player.DEBUG_ACT --es cmd 'prev'
+     *  adb shell am broadcast -a com.fynix.player.DEBUG_ACT --es cmd 'pause'
+     *  adb shell am broadcast -a com.fynix.player.DEBUG_ACT --es cmd 'play'
+     */
+    private fun registerDebugReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                when (intent.action) {
+                    "com.fynix.player.DEBUG_PLAY" -> {
+                        val mid = intent.getStringExtra("mid") ?: return
+                        Log.d("Fynix", "DEBUG_PLAY receiver: mid=$mid")
+                        when (mid) {
+                            "shuffle_all" -> dispatchAction(ACTION_SHUFFLE_ALL)
+                            else -> {
+                                val (songId, parentType, parentId) = parseMediaIdForAuto(mid)
+                                val cb = MainActivity.playMediaCallback
+                                if (cb != null) {
+                                    try { cb(songId, parentType, parentId) } catch (_: Exception) {}
+                                } else {
+                                    getSharedPreferences("fynix_playback", MODE_PRIVATE).edit().apply {
+                                        putString("pending_media_id", mid)
+                                        apply()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "com.fynix.player.DEBUG_ACT" -> {
+                        val cmd = intent.getStringExtra("cmd") ?: return
+                        Log.d("Fynix", "DEBUG_ACT receiver: cmd=$cmd")
+                        val cb = MainActivity.mediaActionCallback
+                        when (cmd) {
+                            "next" -> {
+                                dispatchAction(ACTION_NEXT)
+                            }
+                            "prev" -> dispatchAction(ACTION_PREV)
+                            "pause" -> dispatchAction(ACTION_PAUSE)
+                            "play" -> dispatchAction(ACTION_PLAY)
+                            "toggle" -> dispatchAction(ACTION_TOGGLE)
+                            else -> Log.w("Fynix", "DEBUG_ACT unknown cmd=$cmd")
+                        }
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction("com.fynix.player.DEBUG_PLAY")
+            addAction("com.fynix.player.DEBUG_ACT")
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(receiver, filter)
+        }
+        debugReceiver = receiver
     }
 }
