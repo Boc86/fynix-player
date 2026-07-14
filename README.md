@@ -72,6 +72,10 @@ Download the latest APK from the [Releases page](https://github.com/Boc86/fynix-
 Minimum SDK: **26** (Android 8.0)  
 Target SDK: **34** (Android 14)
 
+### Compatibility
+
+Fynix Player is fully compatible with **Graphene OS** hardened security and memory allocation policies. No special configuration is required — the app works out of the box on Graphene OS devices with all hardened memory protections enabled.
+
 ## Configuration
 
 ### Navidrome

@@ -2086,6 +2086,22 @@ code {
   color: var(--text);
 }
 
+.starred-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.starred-tab svg {
+  width: 14px;
+  height: 14px;
+}
+
+.starred-tab.active {
+  background: var(--primary-bg);
+  color: var(--primary-text);
+}
+
 .library-search { margin-bottom: 12px; }
 
 .library-content { min-height: 200px; }

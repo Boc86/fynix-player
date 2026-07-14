@@ -9,10 +9,12 @@
   let previousView = 'home'
   let searchResults = { navidrome: null, soulsync: null }
   let albumHistoryView = 'home'
-  let libraryState = { tab: 'albums', search: '', sortBy: 'name', albums: null, artists: null, tracks: null }
+  let libraryState = { tab: 'albums', search: '', sortBy: 'name', albums: null, artists: null, tracks: null, starredOnly: false, starredData: null }
   let _allGenres = []
   let _cachedTracks = {}
   let _cachingTracks = {}
+  let _favouriteCachedTracks = {}
+  let _cachingFavouriteTracks = {}
   let _origStreamUrl = null
 
   function $(sel, ctx = document) { return ctx.querySelector(sel) }
@@ -373,10 +375,23 @@
       applySavedSettings()
       if (window.AndroidBridge) {
         _refreshCachedTracks()
+        _refreshFavouriteCachedTracks()
         const mb = parseInt(settings.load().max_cache_size_mb) || 500
         AndroidBridge.setCacheMaxSize(mb * 1048576)
         _origStreamUrl = navidrome.streamUrl.bind(navidrome)
-        navidrome.streamUrl = (id) => _getCachedUrl(id) || _origStreamUrl(id)
+        navidrome.streamUrl = (id) => {
+          if (_getCachedUrl(id)) return _getCachedUrl(id)
+          const s = settings.load()
+          const wifiNative = s.wifi_native_format === 'true' || s.wifi_native_format === true
+          let savedFormat = null
+          if (wifiNative && window.AndroidBridge?.isWifiConnected && AndroidBridge.isWifiConnected()) {
+            savedFormat = navidrome.streamFormat
+            navidrome.streamFormat = 'auto'
+          }
+          const url = _origStreamUrl(id)
+          if (savedFormat !== null) navidrome.streamFormat = savedFormat
+          return url
+        }
       }
       _initKofi()
       const s = settings.load()
@@ -691,20 +706,40 @@
   }
   window._refreshCachedTracks = _refreshCachedTracks
 
+  function _refreshFavouriteCachedTracks() {
+    if (!window.AndroidBridge) return
+    try {
+      const arr = JSON.parse(AndroidBridge.getCachedFavouriteTracks())
+      _favouriteCachedTracks = {}
+      arr.forEach(t => { _favouriteCachedTracks[t.trackId] = t })
+    } catch (_) {}
+  }
+  window._refreshFavouriteCachedTracks = _refreshFavouriteCachedTracks
+
   function _isCached(trackId) { return !!_cachedTracks[trackId] }
 
+  function _isFavouriteCached(trackId) { return !!_favouriteCachedTracks[trackId] }
+
   function _getCachedUrl(trackId) {
-    return _isCached(trackId) ? 'http://localhost:8080/api/cached/' + trackId : ''
+    if (_isFavouriteCached(trackId)) return 'http://localhost:8080/api/cached-favourite/' + trackId
+    if (_isCached(trackId)) return 'http://localhost:8080/api/cached/' + trackId
+    return ''
   }
 
   function cacheTrack(track) {
     console.log('cacheTrack called: id=' + (track?.id || 'none') + ' caching=' + _cachingTracks[track?.id] + ' isCached=' + _isCached(track?.id))
     if (!window.AndroidBridge || _cachingTracks[track.id] || _isCached(track.id)) return
     _cachingTracks[track.id] = true
+    const cacheFmt = settings.load().cache_format || 'mp3'
     let url = navidrome.streamUrl(track.id)
-    url = url.replace(/format=[^&]+/, 'format=mp3')
-    if (url.indexOf('format=') === -1) {
-      url += (url.includes('?') ? '&' : '?') + 'format=mp3'
+    if (cacheFmt === 'native' || cacheFmt === 'auto') {
+      // Keep native format — strip any explicit format param
+      url = url.replace(/[&?]format=[^&]+/, '')
+    } else {
+      url = url.replace(/format=[^&]+/, 'format=' + cacheFmt)
+      if (url.indexOf('format=') === -1) {
+        url += (url.includes('?') ? '&' : '?') + 'format=' + cacheFmt
+      }
     }
     AndroidBridge.cacheTrack(
       track.id, url,
@@ -771,7 +806,7 @@
     $$('.cache-btn:not(.caching)').forEach(el => {
       const id = el.dataset.trackId
       if (!id) return
-      const cached = _isCached(id)
+      const cached = _isCached(id) || _isFavouriteCached(id)
       el.textContent = cached ? '\u2713' : '\u2B07'
       el.title = cached ? 'Cached' : 'Cache for offline'
       el.style.opacity = cached ? '1' : '.5'
@@ -782,6 +817,17 @@
         const s = JSON.parse(AndroidBridge.getCacheStats())
         const maxMb = parseInt(settings.load().max_cache_size_mb) || 500
         stats.textContent = s.count + ' tracks, ' + (s.sizeBytes / 1048576).toFixed(1) + ' MB / ' + maxMb + ' MB max'
+      } catch (_) {}
+    }
+    _renderFavouriteCacheStats()
+  }
+
+  function _renderFavouriteCacheStats() {
+    const el = document.getElementById('favourite-cache-stats')
+    if (el && window.AndroidBridge) {
+      try {
+        const s = JSON.parse(AndroidBridge.getFavouriteCacheStats())
+        el.textContent = s.count + ' tracks, ' + (s.sizeBytes / 1048576).toFixed(1) + ' MB'
       } catch (_) {}
     }
   }
@@ -822,6 +868,72 @@
       _updateCacheUI()
       _renderCachedTracks()
     })
+  }
+
+  let _cachingFavourites = false
+  async function cacheAllFavourites() {
+    if (_cachingFavourites || !window.AndroidBridge) return
+    const statusEl = document.getElementById('cache-favs-status')
+    try {
+      _cachingFavourites = true
+      if (statusEl) statusEl.textContent = 'Fetching starred tracks...'
+      const resp = await navidrome.getStarred2()
+      const songs = resp?.starred2?.song || []
+      if (!songs.length) {
+        if (statusEl) statusEl.textContent = 'No starred tracks found.'
+        return
+      }
+      _refreshFavouriteCachedTracks()
+      const toCache = songs.filter(t => !_isFavouriteCached(t.id))
+      if (!toCache.length) {
+        if (statusEl) statusEl.textContent = 'All ' + songs.length + ' favourites are already cached.'
+        return
+      }
+      if (statusEl) statusEl.textContent = 'Caching 0 / ' + toCache.length + ' favourites...'
+      let done = 0
+      for (const t of toCache) {
+        try {
+          if (_isFavouriteCached(t.id)) { done++; continue }
+          const cacheFmt = settings.load().cache_format || 'mp3'
+          let url = navidrome.streamUrl(t.id)
+          if (cacheFmt === 'native' || cacheFmt === 'auto') {
+            url = url.replace(/[&?]format=[^&]+/, '')
+          } else {
+            url = url.replace(/format=[^&]+/, 'format=' + cacheFmt)
+            if (url.indexOf('format=') === -1) {
+              url += (url.includes('?') ? '&' : '?') + 'format=' + cacheFmt
+            }
+          }
+          AndroidBridge.cacheFavouriteTrack(
+            t.id, url,
+            t.title || t.name || '',
+            t.artist || t.artist_name || '',
+            t.albumName || t.album || '',
+            t.duration || 0
+          )
+          await new Promise((resolve) => {
+            const poll = setInterval(() => {
+              if (AndroidBridge.isCachedFavourite(t.id)) {
+                clearInterval(poll)
+                resolve()
+              }
+            }, 500)
+          })
+          done++
+          _refreshFavouriteCachedTracks()
+          if (statusEl) statusEl.textContent = 'Caching ' + done + ' / ' + toCache.length + ' favourites...'
+        } catch (_) { done++ }
+      }
+      _refreshFavouriteCachedTracks()
+      _updateCacheUI()
+      _renderCachedTracks()
+      _renderFavouriteCacheStats()
+      if (statusEl) statusEl.textContent = 'Cached ' + done + ' favourites successfully.'
+    } catch (e) {
+      if (statusEl) statusEl.textContent = 'Error: ' + e.message
+    } finally {
+      _cachingFavourites = false
+    }
   }
 
   // --- Custom Dropdown ---
@@ -1238,6 +1350,7 @@
           <button class="library-tab ${libraryState.tab === 'albums' ? 'active' : ''}" data-libtab="albums">Albums</button>
           <button class="library-tab ${libraryState.tab === 'artists' ? 'active' : ''}" data-libtab="artists">Artists</button>
           <button class="library-tab ${libraryState.tab === 'tracks' ? 'active' : ''}" data-libtab="tracks">Tracks</button>
+          <button class="library-tab starred-tab ${libraryState.starredOnly ? 'active' : ''}" id="library-starred-btn">${icons.heartFilled} Starred</button>
         </div>
         <div class="library-controls">
           <input type="text" class="input library-search" id="library-search" placeholder="Filter library..." autocomplete="off">
@@ -1261,13 +1374,32 @@
   }
 
   function bindLibraryTabs() {
-    $$('.library-tab').forEach(tab => {
+    $$('.library-tab:not(.starred-tab)').forEach(tab => {
       tab.addEventListener('click', () => {
         libraryState.tab = tab.dataset.libtab
-        $$('.library-tab').forEach(t => t.classList.toggle('active', t.dataset.libtab === libraryState.tab))
+        libraryState.starredOnly = false
+        libraryState.starredData = null
+        $$('.library-tab').forEach(t => t.classList.remove('active'))
+        tab.classList.add('active')
+        const starBtn = document.getElementById('library-starred-btn')
+        if (starBtn) starBtn.classList.remove('active')
         loadLibraryTab()
       })
     })
+    const starBtn = document.getElementById('library-starred-btn')
+    if (starBtn) {
+      starBtn.addEventListener('click', () => {
+        libraryState.starredOnly = !libraryState.starredOnly
+        libraryState.starredData = null
+        $$('.library-tab:not(.starred-tab)').forEach(t => t.classList.remove('active'))
+        starBtn.classList.toggle('active', libraryState.starredOnly)
+        if (!libraryState.starredOnly) {
+          const activeTab = $(`.library-tab[data-libtab="${libraryState.tab}"]`)
+          if (activeTab) activeTab.classList.add('active')
+        }
+        loadLibraryTab()
+      })
+    }
   }
 
   function bindLibrarySearch() {
@@ -1294,6 +1426,31 @@
 
   async function loadLibraryTab() {
     const content = $('#library-content')
+    if (libraryState.starredOnly) {
+      const skelType = libraryState.tab === 'tracks' ? 'tracks' : libraryState.tab === 'artists' ? 'artists' : 'albums'
+      content.innerHTML = `<div class="${skelType === 'tracks' ? 'skel-list' : 'skel-grid'}">${_renderSkeletons(skelType)}</div>`
+      try {
+        if (!libraryState.starredData) {
+          libraryState.starredData = await navidrome.getStarred2()
+        }
+        const sd = libraryState.starredData
+        switch (libraryState.tab) {
+          case 'albums':
+            libraryState.albums = sd?.starred2?.album || []
+            break
+          case 'artists':
+            libraryState.artists = sd?.starred2?.artist || []
+            break
+          case 'tracks':
+            libraryState.tracks = sd?.starred2?.song || []
+            break
+        }
+        renderLibraryContent()
+      } catch (e) {
+        content.innerHTML = `<div class="error-msg">${e.message}</div>`
+      }
+      return
+    }
     const skelType = libraryState.tab === 'tracks' ? 'tracks' : libraryState.tab === 'artists' ? 'artists' : 'albums'
     content.innerHTML = `<div class="${skelType === 'tracks' ? 'skel-list' : 'skel-grid'}">${_renderSkeletons(skelType)}</div>`
 
@@ -2317,6 +2474,19 @@
           _cachedTracks = {}
           _updateCacheUI()
           _renderCachedTracks()
+          _renderFavouriteCacheStats()
+        }
+      }
+      if (e.target.closest('#settings-cache-favs') && window.AndroidBridge) {
+        cacheAllFavourites()
+      }
+      if (e.target.closest('#settings-clear-fav-cache') && window.AndroidBridge) {
+        if (confirm('Clear all cached favourites?')) {
+          AndroidBridge.clearFavouriteCache()
+          _favouriteCachedTracks = {}
+          _updateCacheUI()
+          _renderCachedTracks()
+          _renderFavouriteCacheStats()
         }
       }
     })
@@ -2399,6 +2569,10 @@
                 <span class="settings-field-label">Stream format</span>
                 ${_customSelect('s-format', formatOpts, s.navidrome_stream_format || 'auto')}
               </div>
+              <label class="checkbox-row">
+                <input type="checkbox" id="s-wifi-native" ${s.wifi_native_format === 'true' || s.wifi_native_format === true ? 'checked' : ''}>
+                Play native format on WiFi (skip transcoding)
+              </label>
             </section>
             <button type="button" class="btn btn-primary" id="settings-save">Save Settings</button>
           </form>
@@ -2520,20 +2694,38 @@
         }
         const s = settings.load()
         const maxMb = parseInt(s.max_cache_size_mb) || 500
+        const cacheFmtOpts = { mp3: 'MP3', native: 'Native (no transcode)', flac: 'FLAC', aac: 'AAC', ogg: 'OGG' }
         el.innerHTML = `
           <section class="settings-section">
             <h3>Offline Storage</h3>
             <p class="settings-desc" id="cache-stats"></p>
+            <div class="settings-field" style="margin:8px 0">
+              <span class="settings-field-label">Cache format</span>
+              ${_customSelect('s-cache-format', cacheFmtOpts, s.cache_format || 'mp3')}
+            </div>
             <label style="display:flex;align-items:center;gap:8px;margin:8px 0">
               <span style="white-space:nowrap">Max cache size:</span>
               <input type="range" id="s-max-cache" min="50" max="5000" step="50" value="${maxMb}" style="flex:1">
               <span id="s-max-cache-val" style="min-width:60px;text-align:right">${maxMb} MB</span>
             </label>
             <div id="cached-tracks-list"></div>
-            <button type="button" class="btn btn-danger" id="settings-clear-cache" style="margin-top:12px">Clear All Cached Tracks</button>
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary" id="settings-cache-favs">Cache All Favourites</button>
+              <button type="button" class="btn btn-danger" id="settings-clear-cache">Clear All Cached Tracks</button>
+            </div>
+            <p class="settings-desc" id="cache-favs-status" style="margin-top:8px"></p>
+          </section>
+          <section class="settings-section" style="margin-top:16px">
+            <h3>Favourites Cache</h3>
+            <p class="settings-desc">Starred tracks cached separately. Does not count towards normal cache limit.</p>
+            <p class="settings-desc" id="favourite-cache-stats"></p>
+            <button type="button" class="btn btn-danger" id="settings-clear-fav-cache" style="margin-top:8px">Clear Favourites Cache</button>
           </section>
         `
-        setTimeout(() => { _updateCacheUI(); _renderCachedTracks(); _bindCacheSizeSlider() }, 0)
+        _bindCustomSelect('s-cache-format', cacheFmtOpts, val => {
+          settings.save({ cache_format: val })
+        })
+        setTimeout(() => { _updateCacheUI(); _renderCachedTracks(); _bindCacheSizeSlider(); _renderFavouriteCacheStats() }, 0)
         break
       }
     }
@@ -2562,6 +2754,9 @@
         const formatMap = { 'Auto (native)': 'auto', 'MP3': 'mp3', 'FLAC': 'flac', 'AAC': 'aac', 'OGG': 'ogg', 'WAV': 'wav' }
         s.navidrome_stream_format = formatMap[label.textContent] || 'auto'
       }
+    }
+    if ($('#s-wifi-native')) {
+      s.wifi_native_format = $('#s-wifi-native')?.checked || false
     }
     if ($('#s-eq-enabled')) {
       s.eqEnabled = $('#s-eq-enabled')?.checked || false

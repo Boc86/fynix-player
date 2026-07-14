@@ -17,6 +17,8 @@ class CacheManager(private val context: Context) {
 
     private val audioDir = File(context.cacheDir, "audio")
     private val manifestFile = File(context.cacheDir, "audio/manifest.json")
+    private val favDir = File(context.cacheDir, "audio_favourites")
+    private val favManifestFile = File(context.cacheDir, "audio_favourites/manifest.json")
     private val scope = CoroutineScope(Dispatchers.IO)
     @Volatile
     var maxSizeBytes: Long = 500L * 1024 * 1024
@@ -33,12 +35,13 @@ class CacheManager(private val context: Context) {
 
     init {
         audioDir.mkdirs()
+        favDir.mkdirs()
     }
 
-    private fun loadManifest(): MutableMap<String, CacheEntry> {
-        if (!manifestFile.exists()) return mutableMapOf()
+    private fun loadManifest(manifest: File = manifestFile): MutableMap<String, CacheEntry> {
+        if (!manifest.exists()) return mutableMapOf()
         return try {
-            val text = manifestFile.readText()
+            val text = manifest.readText()
             val arr = JSONArray(text)
             val map = mutableMapOf<String, CacheEntry>()
             for (i in 0 until arr.length()) {
@@ -60,9 +63,9 @@ class CacheManager(private val context: Context) {
         }
     }
 
-    private fun saveManifest(entries: Map<String, CacheEntry>) {
+    private fun saveManifest(entries: Map<String, CacheEntry>, manifest: File = manifestFile) {
         try {
-            manifestFile.parentFile?.mkdirs()
+            manifest.parentFile?.mkdirs()
             val arr = JSONArray()
             entries.values.forEach { entry ->
                 arr.put(JSONObject().apply {
@@ -75,12 +78,11 @@ class CacheManager(private val context: Context) {
                     put("duration", entry.duration)
                 })
             }
-            manifestFile.writeText(arr.toString(2))
+            manifest.writeText(arr.toString(2))
         } catch (_: Exception) {}
     }
 
-    fun cacheTrack(trackId: String, streamUrl: String, title: String, artist: String, album: String, duration: Int = 0, onProgress: ((Int) -> Unit)? = null) {
-        Log.d("Fynix", "CacheManager.cacheTrack: id=$trackId url=$streamUrl")
+    private fun downloadAndSave(trackId: String, streamUrl: String, title: String, artist: String, album: String, duration: Int, targetDir: File, targetManifest: File, onProgress: ((Int) -> Unit)?) {
         scope.launch {
             try {
                 val url = URL(streamUrl)
@@ -97,7 +99,7 @@ class CacheManager(private val context: Context) {
                     contentType.contains("aac", ignoreCase = true) || contentType.contains("m4a", ignoreCase = true) -> "m4a"
                     else -> "mp3"
                 }
-                val file = File(audioDir, "${sanitizeId(trackId)}.$ext")
+                val file = File(targetDir, "${sanitizeId(trackId)}.$ext")
                 val total = conn.contentLength
                 val input = conn.inputStream
                 val output = RandomAccessFile(file, "rw")
@@ -119,7 +121,7 @@ class CacheManager(private val context: Context) {
                 input.close()
                 output.close()
                 conn.disconnect()
-                val entries = loadManifest()
+                val entries = loadManifest(targetManifest)
                 entries[trackId] = CacheEntry(
                     trackId = trackId,
                     title = title,
@@ -129,12 +131,22 @@ class CacheManager(private val context: Context) {
                     fileSize = file.length(),
                     duration = duration
                 )
-                saveManifest(entries)
-                _evictIfNeeded()
+                saveManifest(entries, targetManifest)
+                if (targetDir == audioDir) _evictIfNeeded()
             } catch (e: Exception) {
-                Log.e("Fynix", "CacheManager.cacheTrack error: ${e.message}")
+                Log.e("Fynix", "CacheManager.downloadAndSave error: ${e.message}")
             }
         }
+    }
+
+    fun cacheTrack(trackId: String, streamUrl: String, title: String, artist: String, album: String, duration: Int = 0, onProgress: ((Int) -> Unit)? = null) {
+        Log.d("Fynix", "CacheManager.cacheTrack: id=$trackId url=$streamUrl")
+        downloadAndSave(trackId, streamUrl, title, artist, album, duration, audioDir, manifestFile, onProgress)
+    }
+
+    fun cacheFavouriteTrack(trackId: String, streamUrl: String, title: String, artist: String, album: String, duration: Int = 0, onProgress: ((Int) -> Unit)? = null) {
+        Log.d("Fynix", "CacheManager.cacheFavouriteTrack: id=$trackId url=$streamUrl")
+        downloadAndSave(trackId, streamUrl, title, artist, album, duration, favDir, favManifestFile, onProgress)
     }
 
     fun getCachedPath(trackId: String): String? {
@@ -142,8 +154,17 @@ class CacheManager(private val context: Context) {
         return audioDir.listFiles()?.find { it.name.startsWith("$safeId.") && it.isFile }?.absolutePath
     }
 
+    fun getFavouriteCachedPath(trackId: String): String? {
+        val safeId = sanitizeId(trackId)
+        return favDir.listFiles()?.find { it.name.startsWith("$safeId.") && it.isFile }?.absolutePath
+    }
+
     fun hasCached(trackId: String): Boolean {
         return getCachedPath(trackId) != null
+    }
+
+    fun hasCachedFavourite(trackId: String): Boolean {
+        return getFavouriteCachedPath(trackId) != null
     }
 
     fun deleteTrack(trackId: String) {
@@ -154,12 +175,30 @@ class CacheManager(private val context: Context) {
         saveManifest(entries)
     }
 
+    fun deleteFavouriteTrack(trackId: String) {
+        val safeId = sanitizeId(trackId)
+        favDir.listFiles()?.find { it.name.startsWith("$safeId.") && it.isFile }?.delete()
+        val entries = loadManifest(favManifestFile)
+        entries.remove(trackId)
+        saveManifest(entries, favManifestFile)
+    }
+
     fun getAllTracks(): List<CacheEntry> {
         return loadManifest().values.toList().sortedByDescending { it.cachedAt }
     }
 
+    fun getAllFavouriteTracks(): List<CacheEntry> {
+        return loadManifest(favManifestFile).values.toList().sortedByDescending { it.cachedAt }
+    }
+
     fun getCacheStats(): Pair<Long, Int> {
         val entries = loadManifest()
+        val size = entries.values.sumOf { it.fileSize }
+        return Pair(size, entries.size)
+    }
+
+    fun getFavouriteCacheStats(): Pair<Long, Int> {
+        val entries = loadManifest(favManifestFile)
         val size = entries.values.sumOf { it.fileSize }
         return Pair(size, entries.size)
     }
@@ -191,6 +230,11 @@ class CacheManager(private val context: Context) {
     fun clearAll() {
         audioDir.listFiles()?.forEach { it.delete() }
         manifestFile.delete()
+    }
+
+    fun clearAllFavourites() {
+        favDir.listFiles()?.forEach { it.delete() }
+        favManifestFile.delete()
     }
 
     private fun sanitizeId(id: String): String {

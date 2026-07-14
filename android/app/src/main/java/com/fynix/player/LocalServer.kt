@@ -241,6 +241,53 @@ class LocalServer(
             return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not cached")
         }
 
+        // Serve favourites cached audio files
+        if (uri.startsWith("/api/cached-favourite/") && cacheDir != null) {
+            val trackId = uri.removePrefix("/api/cached-favourite/")
+            val safeId = trackId.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            val favDir = File(cacheDir, "audio_favourites")
+            val file = favDir.listFiles()?.find { it.name.startsWith("$safeId.") && it.isFile }
+            if (file != null) {
+                val ext = file.extension.lowercase()
+                val mime = when (ext) {
+                    "ogg" -> "audio/ogg"
+                    "mp3" -> "audio/mpeg"
+                    "flac" -> "audio/flac"
+                    "wav" -> "audio/wav"
+                    "m4a", "aac", "mp4" -> "audio/mp4"
+                    "opus" -> "audio/opus"
+                    "webm" -> "audio/webm"
+                    else -> "audio/mpeg"
+                }
+                val rangeHeader = session.headers?.get("range")
+                val fileLen = file.length()
+                if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                    val parts = rangeHeader.removePrefix("bytes=").split("-")
+                    val start = parts.firstOrNull()?.toLongOrNull() ?: 0
+                    val end = parts.getOrNull(1)?.toLongOrNull() ?: (fileLen - 1)
+                    val len = (end - start + 1).toInt()
+                    val fis = java.io.FileInputStream(file)
+                    fis.skip(start)
+                    val data = ByteArray(len)
+                    var offset = 0
+                    while (offset < len) {
+                        val read = fis.read(data, offset, len - offset)
+                        if (read == -1) break
+                        offset += read
+                    }
+                    fis.close()
+                    val resp = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mime, data.inputStream(), len.toLong())
+                    resp.addHeader("Content-Range", "bytes $start-$end/$fileLen")
+                    resp.addHeader("Accept-Ranges", "bytes")
+                    return resp
+                }
+                val resp = newFixedLengthResponse(Response.Status.OK, mime, file.inputStream(), fileLen)
+                resp.addHeader("Accept-Ranges", "bytes")
+                return resp
+            }
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not cached")
+        }
+
         val filePath = if (uri == "/" || uri.isBlank()) "web/index.html" else "web$uri"
         return try {
             val input = assets.open(filePath)

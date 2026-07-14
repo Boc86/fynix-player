@@ -6,6 +6,7 @@ class SettingsManager {
       navidrome_password: '',
       navidrome_proxy: '',
       navidrome_stream_format: 'auto',
+      wifi_native_format: 'false',
       soulsync_server: '',
       soulsync_apikey: '',
       soulsync_proxy: '',
@@ -15,6 +16,7 @@ class SettingsManager {
       equalizer: '',
       eqPreset: 'custom',
       max_cache_size_mb: '500',
+      cache_format: 'mp3',
       _settingsTab: 'servers',
       _wizard_done: 'false'
     }

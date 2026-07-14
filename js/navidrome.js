@@ -95,6 +95,10 @@ class NavidromeClient {
     return this._request('getAlbumList2', { type, size: String(size), offset: String(offset) })
   }
 
+  async getStarred2() {
+    return this._request('getStarred2')
+  }
+
   async getRandomSongs(size = 50) {
     return this._request('getRandomSongs', { size: String(size) })
   }

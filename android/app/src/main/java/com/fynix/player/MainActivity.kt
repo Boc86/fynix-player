@@ -330,7 +330,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @JavascriptInterface
-                fun getVersion(): String = "1.2.2"
+                fun getVersion(): String = "1.3.0"
 
                 @JavascriptInterface
                 fun updatePosition(pos: Double) {
@@ -423,6 +423,14 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @JavascriptInterface
+                fun isWifiConnected(): Boolean {
+                    val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return false
+                    val network = cm.activeNetwork ?: return false
+                    val caps = cm.getNetworkCapabilities(network) ?: return false
+                    return caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+                }
+
+                @JavascriptInterface
                 fun cacheTrack(trackId: String, streamUrl: String, title: String, artist: String, album: String, duration: Int) {
                     cacheManager.cacheTrack(trackId, streamUrl, title, artist, album, duration)
                 }
@@ -488,6 +496,59 @@ class MainActivity : AppCompatActivity() {
                 @JavascriptInterface
                 fun enforceCacheLimit() {
                     cacheManager.enforceLimit()
+                }
+
+                @JavascriptInterface
+                fun cacheFavouriteTrack(trackId: String, streamUrl: String, title: String, artist: String, album: String, duration: Int) {
+                    cacheManager.cacheFavouriteTrack(trackId, streamUrl, title, artist, album, duration)
+                }
+
+                @JavascriptInterface
+                fun isCachedFavourite(trackId: String): Boolean {
+                    return cacheManager.hasCachedFavourite(trackId)
+                }
+
+                @JavascriptInterface
+                fun getCachedFavouriteUrl(trackId: String): String {
+                    val path = cacheManager.getFavouriteCachedPath(trackId)
+                    return if (path != null) "http://localhost:8080/api/cached-favourite/$trackId" else ""
+                }
+
+                @JavascriptInterface
+                fun getCachedFavouriteTracks(): String {
+                    val entries = cacheManager.getAllFavouriteTracks()
+                    val arr = org.json.JSONArray()
+                    entries.forEach { entry ->
+                        arr.put(org.json.JSONObject().apply {
+                            put("trackId", entry.trackId)
+                            put("title", entry.title)
+                            put("artist", entry.artist)
+                            put("album", entry.album)
+                            put("cachedAt", entry.cachedAt)
+                            put("fileSize", entry.fileSize)
+                            put("duration", entry.duration)
+                        })
+                    }
+                    return arr.toString()
+                }
+
+                @JavascriptInterface
+                fun deleteCachedFavouriteTrack(trackId: String) {
+                    cacheManager.deleteFavouriteTrack(trackId)
+                }
+
+                @JavascriptInterface
+                fun getFavouriteCacheStats(): String {
+                    val (size, count) = cacheManager.getFavouriteCacheStats()
+                    return org.json.JSONObject().apply {
+                        put("sizeBytes", size)
+                        put("count", count)
+                    }.toString()
+                }
+
+                @JavascriptInterface
+                fun clearFavouriteCache() {
+                    cacheManager.clearAllFavourites()
                 }
             } as Any, "AndroidBridge")
 

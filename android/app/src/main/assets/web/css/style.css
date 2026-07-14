@@ -178,6 +178,8 @@ html, body {
   padding: 0 8px;
 }
 
+/* ===== Bottom Tab Nav (mobile) ===== */
+
 .nav-item {
   display: flex;
   align-items: center;
@@ -216,14 +218,14 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 20px 8px;
+  padding: 12px 20px;
   font-size: 0.68rem;
   color: var(--text3);
   border-top: 1px solid var(--border);
 }
 
 .sidebar-kofi {
-  padding: 8px 20px 4px;
+  padding: 8px 20px;
   display: flex;
   justify-content: center;
 }
@@ -2082,6 +2084,22 @@ code {
 .library-tab:hover:not(.active) {
   background: var(--bg4);
   color: var(--text);
+}
+
+.starred-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.starred-tab svg {
+  width: 14px;
+  height: 14px;
+}
+
+.starred-tab.active {
+  background: var(--primary-bg);
+  color: var(--primary-text);
 }
 
 .library-search { margin-bottom: 12px; }

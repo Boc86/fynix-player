@@ -31,6 +31,7 @@ object ExoPlayerHolder {
     var onTrackError: ((String) -> Unit)? = null
 
     private var currentStreamId = ""
+    private var queueMetas: List<SongMeta> = emptyList()
     private var equalizer: android.media.audiofx.Equalizer? = null
     private var eqEnabled = false
     private var eqGains: FloatArray? = null
@@ -95,7 +96,7 @@ object ExoPlayerHolder {
                 val startIdx = startIndex.coerceIn(0, items.size - 1)
                 val meta = metas[startIdx]
                 withContext(Dispatchers.Main) {
-                    playMediaItems(items, startIdx, meta)
+                    playMediaItems(items, startIdx, meta, metas)
                 }
             } catch (e: Exception) {
                 Log.e("Fynix", "ExoPlayerHolder: playQueueFromJs error: ${e.message}")
@@ -112,7 +113,7 @@ object ExoPlayerHolder {
         val duration: Int
     )
 
-    private fun playMediaItems(items: List<MediaItem>, startIndex: Int, nowPlaying: SongMeta) {
+    private fun playMediaItems(items: List<MediaItem>, startIndex: Int, nowPlaying: SongMeta, allMetas: List<SongMeta>? = null) {
         val ctx = appContext ?: return
         val player = exoPlayer
         if (player == null) {
@@ -121,6 +122,7 @@ object ExoPlayerHolder {
         }
         if (items.isEmpty()) return
         currentStreamId = nowPlaying.id
+        queueMetas = allMetas ?: listOf(nowPlaying)
         val coverArtUrl = if (nowPlaying.coverUrl.startsWith("http")) nowPlaying.coverUrl else {
             if (nowPlaying.coverUrl.isNotBlank()) navidrome?.coverUrl(nowPlaying.coverUrl, 300) ?: "" else ""
         }
@@ -460,6 +462,23 @@ object ExoPlayerHolder {
             val dur = if (p.duration > 0) p.duration else 0L
             val idx = p.currentMediaItemIndex
             Log.d("Fynix", "ExoPlayerHolder: mediaItemTransition idx=$idx pos=$pos")
+            // Update notification/media session metadata for the new track
+            if (idx in queueMetas.indices) {
+                val meta = queueMetas[idx]
+                val ctx = appContext ?: return
+                val coverUrl = if (meta.coverUrl.startsWith("http")) meta.coverUrl else {
+                    if (meta.coverUrl.isNotBlank()) navidrome?.coverUrl(meta.coverUrl, 300) ?: "" else ""
+                }
+                AudioService.updateNowPlaying(
+                    ctx,
+                    title = meta.title,
+                    artist = meta.artist,
+                    album = meta.album,
+                    coverArt = coverUrl,
+                    duration = meta.duration,
+                    mediaId = meta.id
+                )
+            }
             onMediaItemTransition?.invoke(pos, dur, idx)
         }
 
