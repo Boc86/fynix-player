@@ -17,7 +17,8 @@ data class NavSong(
     val albumId: String,
     val duration: Int,
     val trackNumber: Int,
-    val coverArt: String
+    val coverArt: String,
+    val replayGain: Float = 0f
 )
 
 data class NavAlbum(
@@ -125,7 +126,8 @@ class NavidromeClient(
             val o = arr.getJSONObject(i)
             NavSong(o.getString("id"), o.getString("title"), o.optString("artist", ""),
                 o.optString("album", ""), o.optString("albumId", ""),
-                o.optInt("duration", 0), o.optInt("track", 0), o.optString("coverArt", ""))
+                o.optInt("duration", 0), o.optInt("track", 0), o.optString("coverArt", ""),
+                o.optDouble("replayGain", 0.0).toFloat())
         }
         return albumData to songs
     }
@@ -147,7 +149,8 @@ class NavidromeClient(
             val o = arr.getJSONObject(i)
             NavSong(o.getString("id"), o.getString("title"), o.optString("artist", ""),
                 o.optString("album", ""), o.optString("albumId", ""),
-                o.optInt("duration", 0), o.optInt("track", 0), o.optString("coverArt", ""))
+                o.optInt("duration", 0), o.optInt("track", 0), o.optString("coverArt", ""),
+                o.optDouble("replayGain", 0.0).toFloat())
         }
     }
 
@@ -177,7 +180,8 @@ class NavidromeClient(
                 val o = arr.getJSONObject(i)
                 NavSong(o.getString("id"), o.getString("title"), o.optString("artist", ""),
                     o.optString("album", ""), o.optString("albumId", ""),
-                    o.optInt("duration", 0), o.optInt("track", 0), o.optString("coverArt", ""))
+                    o.optInt("duration", 0), o.optInt("track", 0), o.optString("coverArt", ""),
+                    o.optDouble("replayGain", 0.0).toFloat())
             }
         }
         return Triple(artists, albums, songs)
@@ -196,7 +200,8 @@ class NavidromeClient(
             song.getString("id"), song.getString("title"),
             song.optString("artist", ""), song.optString("album", ""),
             song.optString("albumId", ""), song.optInt("duration", 0),
-            song.optInt("track", 0), song.optString("coverArt", "")
+            song.optInt("track", 0), song.optString("coverArt", ""),
+            song.optDouble("replayGain", 0.0).toFloat()
         )
     }
 

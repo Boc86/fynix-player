@@ -330,7 +330,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @JavascriptInterface
-                fun getVersion(): String = "1.3.0"
+                fun getVersion(): String = "1.3.1"
 
                 @JavascriptInterface
                 fun updatePosition(pos: Double) {
@@ -348,7 +348,8 @@ class MainActivity : AppCompatActivity() {
                         val album = obj.optString("album", obj.optString("albumName", ""))
                         val coverUrl = obj.optString("coverUrl", obj.optString("coverArt", ""))
                         val duration = obj.optInt("duration", 0)
-                        ExoPlayerHolder.playStream(id, streamUrl, title, artist, album, coverUrl, duration)
+                        val replayGain = obj.optDouble("replayGain", 0.0).toFloat()
+                        ExoPlayerHolder.playStream(id, streamUrl, title, artist, album, coverUrl, duration, replayGain)
                     } catch (e: Exception) {
                         Log.e("Fynix", "playStream bridge error: ${e.message}")
                     }

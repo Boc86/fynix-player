@@ -35,6 +35,7 @@ object ExoPlayerHolder {
     private var equalizer: android.media.audiofx.Equalizer? = null
     private var eqEnabled = false
     private var eqGains: FloatArray? = null
+    private var _userVolume: Float = 1f
     /** Signatures of recent queue builds used to dedupe noisy JS pushes. */
     private var lastQueueSig: String? = null
     private var lastQueueIndex: Int = -1
@@ -57,9 +58,9 @@ object ExoPlayerHolder {
 
     fun isInitialized(): Boolean = exoPlayer != null
 
-    fun playStream(id: String, streamUrl: String, title: String, artist: String, album: String, coverUrl: String, duration: Int) {
+    fun playStream(id: String, streamUrl: String, title: String, artist: String, album: String, coverUrl: String, duration: Int, replayGain: Float = 0f) {
         val item = MediaItem.fromUri(streamUrl)
-        val singMeta = SongMeta(id, title, artist, album, coverUrl, duration)
+        val singMeta = SongMeta(id, title, artist, album, coverUrl, duration, replayGain)
         playMediaItems(listOf(item), 0, singMeta)
     }
 
@@ -89,8 +90,9 @@ object ExoPlayerHolder {
                     val album = t.optString("album", t.optString("albumName", ""))
                     val coverUrl = t.optString("coverUrl", t.optString("coverArt", ""))
                     val duration = t.optInt("duration", 0)
+                    val replayGain = t.optDouble("replayGain", 0.0).toFloat()
                     items.add(MediaItem.fromUri(streamUrl))
-                    metas.add(SongMeta(id, title, artist, album, coverUrl, duration))
+                    metas.add(SongMeta(id, title, artist, album, coverUrl, duration, replayGain))
                 }
                 if (items.isEmpty()) return@launch
                 val startIdx = startIndex.coerceIn(0, items.size - 1)
@@ -110,7 +112,8 @@ object ExoPlayerHolder {
         val artist: String,
         val album: String,
         val coverUrl: String,
-        val duration: Int
+        val duration: Int,
+        val replayGain: Float = 0f
     )
 
     private fun playMediaItems(items: List<MediaItem>, startIndex: Int, nowPlaying: SongMeta, allMetas: List<SongMeta>? = null) {
@@ -162,6 +165,7 @@ object ExoPlayerHolder {
             player.setMediaItems(items, startIdx, 0L)
             player.prepare()
             player.play()
+            applyReplayGain(nowPlaying)
             initEqualizer()
             Log.d(
                 "Fynix",
@@ -213,7 +217,7 @@ object ExoPlayerHolder {
                                 nowPlaying = SongMeta(
                                     s.id, s.title, s.artist, s.album,
                                     s.coverArt.ifBlank { albumData?.coverArt ?: "" },
-                                    s.duration
+                                    s.duration, s.replayGain
                                 )
                             }
                         }
@@ -226,7 +230,7 @@ object ExoPlayerHolder {
                                 startIndex = idx
                                 nowPlaying = SongMeta(
                                     s.id, s.title, s.artist, s.album,
-                                    s.coverArt, s.duration
+                                    s.coverArt, s.duration, s.replayGain
                                 )
                             }
                         }
@@ -237,7 +241,7 @@ object ExoPlayerHolder {
                         if (song != null) {
                             nowPlaying = SongMeta(
                                 song.id, song.title, song.artist, song.album,
-                                song.coverArt, song.duration
+                                song.coverArt, song.duration, song.replayGain
                             )
                             listOf(MediaItem.fromUri(n.streamUrl(songId)))
                         } else {
@@ -277,7 +281,23 @@ object ExoPlayerHolder {
     }
 
     fun setVolume(vol: Float) {
-        handler.post { exoPlayer?.volume = vol }
+        _userVolume = vol
+        handler.post {
+            val meta = if (currentStreamId.isNotEmpty()) queueMetas.getOrNull(exoPlayer?.currentMediaItemIndex ?: 0) else null
+            val gain = meta?.replayGain ?: 0f
+            val effective = if (gain != 0f) (vol * Math.pow(10.0, gain.toDouble() / 20.0)).toFloat().coerceIn(0f, 1f) else vol
+            exoPlayer?.volume = effective
+        }
+    }
+
+    private fun applyReplayGain(meta: SongMeta?) {
+        if (meta == null || meta.replayGain == 0f) {
+            exoPlayer?.volume = _userVolume
+            return
+        }
+        val gainLinear = Math.pow(10.0, meta.replayGain.toDouble() / 20.0).toFloat()
+        val effective = (_userVolume * gainLinear).coerceIn(0f, 1f)
+        exoPlayer?.volume = effective
     }
 
     fun pause() {
@@ -465,6 +485,7 @@ object ExoPlayerHolder {
             // Update notification/media session metadata for the new track
             if (idx in queueMetas.indices) {
                 val meta = queueMetas[idx]
+                applyReplayGain(meta)
                 val ctx = appContext ?: return
                 val coverUrl = if (meta.coverUrl.startsWith("http")) meta.coverUrl else {
                     if (meta.coverUrl.isNotBlank()) navidrome?.coverUrl(meta.coverUrl, 300) ?: "" else ""

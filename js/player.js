@@ -7,6 +7,8 @@ class MusicPlayer {
     this.shuffle = false
     this.crossfade = 0
     this._savedVolume = 1
+    this._userVolume = 1
+    this._replayGainDb = 0
     this.listeners = {}
     this._nativeState = { playing: false, currentTime: 0, duration: 0 }
     this._saveTimer = null
@@ -112,6 +114,23 @@ class MusicPlayer {
     } catch (_) {}
   }
 
+  _replayGainToLinear(db) {
+    return Math.pow(10, db / 20)
+  }
+
+  _parseReplayGain(rg) {
+    if (!rg) return 0
+    if (typeof rg === 'number') return rg
+    if (typeof rg === 'object') {
+      return rg.trackGain || rg.TrackGain || 0
+    }
+    return 0
+  }
+
+  _effectiveVol() {
+    return Math.max(0, Math.min(1, this._userVolume * this._replayGainToLinear(this._replayGainDb || 0)))
+  }
+
   setEq(gains) {
     if (this._native) {
       if (window.AndroidBridge?.nativeSetEqGains) {
@@ -181,7 +200,7 @@ class MusicPlayer {
             id: t.id, title: t.title, name: t.name,
             artist: t.artist, artist_name: t.artist_name, albumArtist: t.albumArtist,
             album: t.album, albumName: t.albumName, duration: t.duration,
-            track: t.track, coverArt: t.coverArt, streamUrl: t.streamUrl, coverUrl: t.coverUrl
+            track: t.track, coverArt: t.coverArt, streamUrl: t.streamUrl, coverUrl: t.coverUrl, replayGain: this._parseReplayGain(t.replayGain)
           })),
           currentIndex: this.currentIndex,
           currentTime: this._nativeState?.currentTime || 0,
@@ -210,14 +229,15 @@ class MusicPlayer {
           track: t.track,
           coverArt: t.coverArt,
           streamUrl: t.streamUrl,
-          coverUrl: t.coverUrl
+          coverUrl: t.coverUrl,
+          replayGain: this._parseReplayGain(t.replayGain)
         })),
         currentIndex: state.currentIndex,
         currentTime: state.currentTime,
         playing: state.playing,
         repeat: state.repeat,
         shuffle: state.shuffle,
-        volume: state.volume,
+        volume: this._userVolume,
         timestamp: Date.now()
       }
       localStorage.setItem('fynix_playback_state', JSON.stringify(data))
@@ -236,7 +256,11 @@ class MusicPlayer {
       this.currentIndex = data.currentIndex >= 0 && data.currentIndex < data.queue.length ? data.currentIndex : 0
       this.repeat = data.repeat || false
       this.shuffle = data.shuffle || false
-      if (data.volume !== undefined && !this._native) this.audio.volume = data.volume
+      if (data.volume !== undefined && !this._native) {
+        this._userVolume = data.volume
+        this.audio.volume = this._effectiveVol()
+        this._savedVolume = this.audio.volume
+      }
       this._restored = true
       this._restoredPlaying = !!data.playing
       this._savedCurrentTime = data.currentTime || 0
@@ -275,7 +299,7 @@ class MusicPlayer {
       currentTime: this.audio.currentTime,
       duration: this.audio.duration || 0,
       trackDuration: track?.duration || 0,
-      volume: this.audio.volume,
+      volume: this._userVolume,
       repeat: this.repeat,
       shuffle: this.shuffle
     }
@@ -309,6 +333,7 @@ class MusicPlayer {
   _loadCurrent(autoplay = true) {
     const track = this.queue[this.currentIndex]
     if (!track) return
+    this._replayGainDb = this._parseReplayGain(track.replayGain)
     if (this._native) {
       if (window.AndroidBridge && this.queue.length > 0) {
         const playOne = (t) => window.AndroidBridge.playStream(JSON.stringify({
@@ -318,7 +343,8 @@ class MusicPlayer {
           artist: t.artist || t.artist_name || t.albumArtist || '',
           album: t.album || t.albumName || '',
           coverUrl: t.coverUrl || t.coverArt || '',
-          duration: t.duration || 0
+          duration: t.duration || 0,
+          replayGain: this._parseReplayGain(t.replayGain)
         }))
         if (this.queue.length > 1 && window.AndroidBridge.nativeSetQueueFromJs) {
           // Push full queue so Android Auto MediaSession queue + gapless reflect it
@@ -331,7 +357,8 @@ class MusicPlayer {
               artist: t.artist || t.artist_name || t.albumArtist || '',
               album: t.album || t.albumName || '',
               coverUrl: t.coverUrl || t.coverArt || '',
-              duration: t.duration || 0
+              duration: t.duration || 0,
+              replayGain: this._parseReplayGain(t.replayGain)
             }))
           }
           try { window.AndroidBridge.nativeSetQueueFromJs(JSON.stringify(payload)) } catch (_) { playOne(track) }
@@ -360,6 +387,8 @@ class MusicPlayer {
     }
     this.audio.src = track.streamUrl || ''
     this.audio.load()
+    this.audio.volume = this._effectiveVol()
+    this._savedVolume = this.audio.volume
     if (autoplay) {
       this.audio.play().catch(() => {})
     }
@@ -450,6 +479,7 @@ class MusicPlayer {
   }
 
   setVolume(v) {
+    this._userVolume = Math.max(0, Math.min(1, v))
     if (this._native) {
       if (window.AndroidBridge) {
         window.AndroidBridge.nativeSetVolume(Math.max(0, Math.min(1, v)))
@@ -457,7 +487,7 @@ class MusicPlayer {
       return
     }
     if (this._fading) return
-    this.audio.volume = Math.max(0, Math.min(1, v))
+    this.audio.volume = this._effectiveVol()
     this._savedVolume = this.audio.volume
   }
 

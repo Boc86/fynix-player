@@ -11,8 +11,8 @@ android {
         applicationId = "com.fynix.player"
         minSdk = 27
         targetSdk = 34
-        versionCode = 21
-        versionName = "1.3.0"
+        versionCode = 22
+        versionName = "1.3.1"
     }
 
     buildTypes {
