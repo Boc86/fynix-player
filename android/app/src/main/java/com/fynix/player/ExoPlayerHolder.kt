@@ -208,31 +208,30 @@ object ExoPlayerHolder {
                 }
                 var nowPlaying: SongMeta? = null
                 var startIndex = 0
+                var allMetas: List<SongMeta>? = null
                 val items: List<MediaItem> = when (parentType) {
                     "album" -> {
                         val (albumData, songs) = n.getAlbum(parentId)
-                        songs.forEachIndexed { idx, s ->
-                            if (s.id == songId) {
-                                startIndex = idx
-                                nowPlaying = SongMeta(
-                                    s.id, s.title, s.artist, s.album,
-                                    s.coverArt.ifBlank { albumData?.coverArt ?: "" },
-                                    s.duration, s.replayGain
-                                )
-                            }
+                        allMetas = songs.map { s ->
+                            val meta = SongMeta(
+                                s.id, s.title, s.artist, s.album,
+                                s.coverArt.ifBlank { albumData?.coverArt ?: "" },
+                                s.duration, s.replayGain
+                            )
+                            if (s.id == songId) { startIndex = songs.indexOf(s); nowPlaying = meta }
+                            meta
                         }
                         songs.map { s -> MediaItem.fromUri(n.streamUrl(s.id)) }
                     }
                     "playlist" -> {
                         val songs = n.getPlaylist(parentId)
-                        songs.forEachIndexed { idx, s ->
-                            if (s.id == songId) {
-                                startIndex = idx
-                                nowPlaying = SongMeta(
-                                    s.id, s.title, s.artist, s.album,
-                                    s.coverArt, s.duration, s.replayGain
-                                )
-                            }
+                        allMetas = songs.map { s ->
+                            val meta = SongMeta(
+                                s.id, s.title, s.artist, s.album,
+                                s.coverArt, s.duration, s.replayGain
+                            )
+                            if (s.id == songId) { startIndex = songs.indexOf(s); nowPlaying = meta }
+                            meta
                         }
                         songs.map { s -> MediaItem.fromUri(n.streamUrl(s.id)) }
                     }
@@ -257,7 +256,7 @@ object ExoPlayerHolder {
                 val coverUrl = if (meta.coverUrl.isNotBlank()) n.coverUrl(meta.coverUrl, 300) else ""
                 val resolved = meta.copy(coverUrl = coverUrl)
                 withContext(Dispatchers.Main) {
-                    playMediaItems(items, startIndex, resolved)
+                    playMediaItems(items, startIndex, resolved, allMetas)
                 }
             } catch (e: Exception) {
                 Log.e("Fynix", "ExoPlayerHolder: handlePlayMediaId error: ${e.message}")
